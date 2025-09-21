@@ -1,455 +1,381 @@
-// EBook Plugin Admin JavaScript
+/* ebook-admin.js - Admin JavaScript */
+
 jQuery(document).ready(function($) {
     
-    // Generate audio functionality in admin
+    // Add New eBook Functionality
+    $('#add_new_ebook').on('click', function(e) {
+        e.preventDefault();
+        
+        const $btn = $(this);
+        const $input = $('#new_ebook_name');
+        const ebookName = $input.val().trim();
+        
+        if (!ebookName) {
+            alert('Please enter an eBook name.');
+            $input.focus();
+            return;
+        }
+        
+        // Disable button and show loading
+        $btn.prop('disabled', true).addClass('loading');
+        
+        $.ajax({
+            url: ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'add_new_ebook',
+                ebook_name: ebookName,
+                nonce: ebook_admin_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    // Add new radio button option
+                    const termId = response.data.term_id;
+                    const termName = response.data.name;
+                    
+                    // Uncheck existing radio buttons
+                    $('input[name="tax_input[ebook][]"]').prop('checked', false);
+                    
+                    // Add new option and select it
+                    const newOption = `
+                        <li>
+                            <label>
+                                <input type="radio" name="tax_input[ebook][]" value="${termId}" checked> 
+                                ${termName}
+                            </label>
+                        </li>
+                    `;
+                    $('#ebookchecklist').append(newOption);
+                    
+                    // Clear input
+                    $input.val('');
+                    
+                    showAdminNotice('eBook "' + termName + '" created successfully!', 'success');
+                } else {
+                    showAdminNotice(response.data || 'Failed to create eBook', 'error');
+                }
+            },
+            error: function() {
+                showAdminNotice('Failed to create eBook. Please try again.', 'error');
+            },
+            complete: function() {
+                $btn.prop('disabled', false).removeClass('loading');
+            }
+        });
+    });
+    
+    // Enter key support for new ebook input
+    $('#new_ebook_name').on('keypress', function(e) {
+        if (e.which === 13) {
+            e.preventDefault();
+            $('#add_new_ebook').click();
+        }
+    });
+    
+    // Audio Generation in Admin
     $('#generate_audio').on('click', function(e) {
         e.preventDefault();
         
         const $btn = $(this);
-        const postId = $('#post_ID').val();
+        const chapterId = $btn.data('chapter-id') || $('input[name="post_ID"]').val();
+        const $status = $('#audio-generation-status');
         
-        if (!postId) {
-            alert('Please save the post first');
+        if (!chapterId) {
+            showAdminNotice('Error: Chapter ID not found', 'error');
             return;
         }
         
-        $btn.prop('disabled', true).text('Generating Audio...');
-        
-        // Get the content from the editor
-        let content = '';
-        if (typeof tinymce !== 'undefined' && tinymce.get('content')) {
-            content = tinymce.get('content').getContent();
-        } else {
-            content = $('#content').val();
-        }
-        
+        // Check if there's content to convert
+        const content = getChapterContent();
         if (!content.trim()) {
-            alert('Please add content first');
-            $btn.prop('disabled', false).text('Generate Audio from Content');
+            showAdminNotice('Please add some content to the chapter before generating audio.', 'warning');
             return;
         }
+        
+        // Show loading state
+        $btn.prop('disabled', true).addClass('loading');
+        $status.removeClass('success error').addClass('loading')
+               .text('Generating audio from chapter content...').show();
         
         $.ajax({
             url: ajaxurl,
             type: 'POST',
             data: {
                 action: 'convert_text_to_audio',
-                chapter_id: postId,
-                nonce: $('#ebook_chapter_meta_nonce').val()
+                chapter_id: chapterId,
+                nonce: ebook_admin_ajax.nonce
             },
+            timeout: 120000, // 2 minute timeout for admin
             success: function(response) {
                 if (response.success) {
-                    $('#ebook_audio_url').val(response.data.audio_url);
+                    $status.removeClass('loading error').addClass('success')
+                           .text(response.data.message || 'Audio generated successfully!');
+                    
+                    // Update the audio URL field if it exists
+                    if (response.data.audio_url) {
+                        $('#ebook_audio_url').val(response.data.audio_url);
+                    }
+                    
+                    // Update current audio display
+                    updateAudioDisplay(response.data.audio_url);
+                    
                     showAdminNotice('Audio generated successfully!', 'success');
                 } else {
+                    $status.removeClass('loading success').addClass('error')
+                           .text(response.data || 'Failed to generate audio');
                     showAdminNotice(response.data || 'Failed to generate audio', 'error');
                 }
-                $btn.prop('disabled', false).text('Generate Audio from Content');
             },
-            error: function() {
-                showAdminNotice('An error occurred while generating audio', 'error');
-                $btn.prop('disabled', false).text('Generate Audio from Content');
+            error: function(xhr, status, error) {
+                let errorMessage = 'Failed to generate audio';
+                
+                if (status === 'timeout') {
+                    errorMessage = 'Request timed out. The audio generation may still be processing.';
+                } else if (xhr.responseJSON && xhr.responseJSON.data) {
+                    errorMessage = xhr.responseJSON.data;
+                }
+                
+                $status.removeClass('loading success').addClass('error').text(errorMessage);
+                showAdminNotice(errorMessage, 'error');
+            },
+            complete: function() {
+                $btn.prop('disabled', false).removeClass('loading');
+                
+                // Hide status after 10 seconds
+                setTimeout(function() {
+                    $status.fadeOut();
+                }, 10000);
             }
         });
     });
     
-    // Show admin notice
-    function showAdminNotice(message, type) {
-        const noticeClass = type === 'success' ? 'notice-success' : 'notice-error';
-        const notice = $(`
-            <div class="notice ${noticeClass} is-dismissible">
-                <p>${message}</p>
-                <button type="button" class="notice-dismiss">
-                    <span class="screen-reader-text">Dismiss this notice.</span>
-                </button>
-            </div>
-        `);
+    // Auto-suggest chapter order
+    $('#ebook_book_id, input[name="tax_input[ebook][]"]:checked').on('change', function() {
+        const selectedEbook = getSelectedEbook();
         
-        $('.wrap h1').after(notice);
-        
-        // Auto dismiss after 5 seconds
-        setTimeout(() => {
-            notice.fadeOut(() => notice.remove());
-        }, 5000);
-        
-        // Manual dismiss
-        notice.find('.notice-dismiss').on('click', function() {
-            notice.fadeOut(() => notice.remove());
-        });
-    }
-    
-    // Auto-save chapter order when changed
-    $('#ebook_chapter_order').on('change', function() {
-        const order = $(this).val();
-        const postId = $('#post_ID').val();
-        
-        if (postId && order) {
+        if (selectedEbook && !$('#ebook_chapter_order').val()) {
             $.ajax({
                 url: ajaxurl,
                 type: 'POST',
                 data: {
-                    action: 'save_chapter_order',
-                    post_id: postId,
-                    order: order,
-                    nonce: $('#ebook_chapter_meta_nonce').val()
+                    action: 'get_next_chapter_order',
+                    ebook_id: selectedEbook,
+                    nonce: ebook_admin_ajax.nonce
+                },
+                success: function(response) {
+                    if (response.success && response.data.next_order) {
+                        $('#ebook_chapter_order').val(response.data.next_order);
+                        $('#ebook_chapter_order').effect('highlight', {color: '#ffffaa'}, 1000);
+                    }
+                }
+            });
+        }
+    });
+    
+    // Chapter order validation
+    $('#ebook_chapter_order').on('blur', function() {
+        const order = parseInt($(this).val());
+        if (order < 1) {
+            $(this).val(1);
+            showAdminNotice('Chapter order cannot be less than 1.', 'warning');
+        }
+    });
+    
+    // Real-time chapter count update
+    function updateChapterCount() {
+        const selectedEbook = getSelectedEbook();
+        
+        if (selectedEbook) {
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'get_chapter_count',
+                    ebook_id: selectedEbook,
+                    nonce: ebook_admin_ajax.nonce
                 },
                 success: function(response) {
                     if (response.success) {
-                        showAdminNotice('Chapter order saved', 'success');
+                        const count = response.data.count;
+                        const $info = $('.chapter-count-info');
+                        
+                        if ($info.length) {
+                            $info.text(`(${count} chapters)`);
+                        } else {
+                            const selectedLabel = $('input[name="tax_input[ebook][]"]:checked').parent();
+                            selectedLabel.append(` <span class="chapter-count-info">(${count} chapters)</span>`);
+                        }
                     }
                 }
             });
         }
-    });
+    }
     
-    // Book selection change handler
-    $('#ebook_book_id').on('change', function() {
-        const bookId = $(this).val();
-        const postId = $('#post_ID').val();
-        
-        if (postId && bookId) {
-            // Update chapter order suggestions based on existing chapters
-            updateChapterOrderSuggestion(bookId);
+    // URL validation for audio field
+    $('#ebook_audio_url').on('blur', function() {
+        const url = $(this).val().trim();
+        if (url && !isValidUrl(url)) {
+            showAdminNotice('Please enter a valid audio URL.', 'warning');
+            $(this).focus();
         }
     });
     
-    // Update chapter order suggestion
-    function updateChapterOrderSuggestion(bookId) {
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'get_next_chapter_order',
-                book_id: bookId,
-                nonce: $('#ebook_chapter_meta_nonce').val()
-            },
-            success: function(response) {
-                if (response.success) {
-                    const suggestedOrder = response.data.next_order;
-                    const $orderField = $('#ebook_chapter_order');
-                    
-                    if (!$orderField.val()) {
-                        $orderField.val(suggestedOrder);
-                        $orderField.after(`<small class="description">Suggested order: ${suggestedOrder}</small>`);
-                    }
-                }
-            }
-        });
-    }
-    
-    // Bulk operations for chapters
-    $('.tablenav .actions select[name="action"]').after(`
-        <select name="bulk_book_id" style="display:none;">
-            <option value="">Select Book...</option>
-        </select>
-    `);
-    
-    // Load books for bulk operations
-    loadBooksForBulkOperations();
-    
-    function loadBooksForBulkOperations() {
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'get_ebooks_list',
-                nonce: $('#ebook_chapter_meta_nonce').val()
-            },
-            success: function(response) {
-                if (response.success) {
-                    let options = '<option value="">Select Book...</option>';
-                    response.data.books.forEach(book => {
-                        options += `<option value="${book.ID}">${book.post_title}</option>`;
-                    });
-                    $('select[name="bulk_book_id"]').html(options);
-                }
-            }
-        });
-    }
-    
-    // Handle bulk action changes
-    $('.tablenav .actions select[name="action"]').on('change', function() {
-        const action = $(this).val();
-        const $bulkBookSelect = $('select[name="bulk_book_id"]');
+    // Bulk operations for admin list
+    if ($('.wp-list-table').length) {
+        // Add bulk regenerate audio option
+        $('<option>').val('regenerate_audio').text('Regenerate Audio').appendTo('#bulk-action-selector-top, #bulk-action-selector-bottom');
         
-        if (action === 'assign_to_book') {
-            $bulkBookSelect.show();
-        } else {
-            $bulkBookSelect.hide();
-        }
-    });
-    
-    // Chapter reordering functionality
-    if ($('.wp-list-table tbody').length) {
-        $('.wp-list-table tbody').sortable({
-            items: 'tr',
-            cursor: 'move',
-            axis: 'y',
-            handle: '.column-title',
-            helper: function(e, ui) {
-                ui.children().each(function() {
-                    $(this).width($(this).width());
-                });
-                return ui;
-            },
-            update: function(event, ui) {
-                const order = [];
-                $(this).find('tr').each(function(index) {
-                    const postId = $(this).find('input[type="checkbox"]').val();
-                    if (postId) {
-                        order.push({
-                            id: postId,
-                            order: index + 1
-                        });
-                    }
-                });
-                
-                updateChapterOrder(order);
-            }
-        });
-        
-        // Add visual indicator for sortable rows
-        $('.wp-list-table tbody tr').css('cursor', 'move');
-        $('.wp-list-table .column-title').prepend('<span class="dashicons dashicons-menu" style="margin-right: 5px; color: #ccc;"></span>');
-    }
-    
-    function updateChapterOrder(order) {
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'update_chapters_order',
-                order: order,
-                nonce: $('#ebook_chapter_meta_nonce').val()
-            },
-            success: function(response) {
-                if (response.success) {
-                    showAdminNotice('Chapter order updated', 'success');
-                } else {
-                    showAdminNotice('Failed to update chapter order', 'error');
-                }
-            },
-            error: function() {
-                showAdminNotice('Error updating chapter order', 'error');
-            }
-        });
-    }
-    
-    // Preview chapter functionality
-    $(document).on('click', '.preview-chapter', function(e) {
-        e.preventDefault();
-        const chapterId = $(this).data('chapter-id');
-        const bookId = $(this).data('book-id');
-        
-        if (!chapterId || !bookId) return;
-        
-        // Open preview in new window
-        const previewUrl = `${window.location.origin}${window.location.pathname}?post=${bookId}&action=edit&preview_chapter=${chapterId}`;
-        window.open(previewUrl, '_blank');
-    });
-    
-    // Add preview buttons to chapter list
-    $('.wp-list-table .column-title').each(function() {
-        const $titleColumn = $(this);
-        const $editLink = $titleColumn.find('.row-actions .edit a');
-        
-        if ($editLink.length) {
-            const editUrl = $editLink.attr('href');
-            const postMatch = editUrl.match(/post=(\d+)/);
+        // Handle bulk actions
+        $(document).on('click', '#doaction, #doaction2', function(e) {
+            const action = $(this).siblings('select').val();
             
-            if (postMatch) {
-                const chapterId = postMatch[1];
-                const bookId = $titleColumn.closest('tr').find('input[name="book_id"]').val();
+            if (action === 'regenerate_audio') {
+                const selectedItems = $('input[name="post[]"]:checked').length;
                 
-                $titleColumn.find('.row-actions').append(`
-                    | <span class="preview">
-                        <a href="#" class="preview-chapter" data-chapter-id="${chapterId}" data-book-id="${bookId}">Preview</a>
-                    </span>
-                `);
+                if (selectedItems === 0) {
+                    e.preventDefault();
+                    alert('Please select chapters to regenerate audio for.');
+                    return;
+                }
+                
+                const confirm = window.confirm(`Are you sure you want to regenerate audio for ${selectedItems} chapter(s)? This may take several minutes.`);
+                if (!confirm) {
+                    e.preventDefault();
+                }
             }
-        }
+        });
+    }
+    
+    // Help tooltips
+    $('<span class="help-tip" title="Enter a number to set the order of this chapter within the eBook. Lower numbers appear first.">?</span>')
+        .insertAfter('label[for="ebook_chapter_order"]');
+    
+    $('.help-tip').tooltip({
+        position: { my: "left+15 center", at: "right center" },
+        tooltipClass: "ui-tooltip-help"
     });
     
-    // Word count and reading time calculator
-    function calculateWordCount() {
-        let content = '';
-        if (typeof tinymce !== 'undefined' && tinymce.get('content')) {
-            content = tinymce.get('content').getContent({format: 'text'});
-        } else {
-            content = $('#content').val().replace(/<[^>]*>/g, '');
+    // Auto-save draft functionality
+    let autoSaveTimeout;
+    $('#title, #content').on('input', function() {
+        clearTimeout(autoSaveTimeout);
+        autoSaveTimeout = setTimeout(function() {
+            $('#save-post').click();
+        }, 30000); // Auto-save after 30 seconds of inactivity
+    });
+    
+    // Initialize
+    setTimeout(function() {
+        updateChapterCount();
+        
+        // Show helpful tips for new users
+        if (!localStorage.getItem('ebook_admin_tips_shown')) {
+            showAdminTips();
+            localStorage.setItem('ebook_admin_tips_shown', 'true');
         }
-        
-        const words = content.trim().split(/\s+/).filter(word => word.length > 0);
-        const wordCount = words.length;
-        const readingTime = Math.ceil(wordCount / 200); // Average reading speed: 200 words per minute
-        
-        updateWordCountDisplay(wordCount, readingTime);
+    }, 1000);
+    
+    // Utility Functions
+    function getSelectedEbook() {
+        const checkedRadio = $('input[name="tax_input[ebook][]"]:checked');
+        return checkedRadio.length ? checkedRadio.val() : null;
     }
     
-    function updateWordCountDisplay(wordCount, readingTime) {
-        let $statsDiv = $('#chapter-stats');
-        
-        if (!$statsDiv.length) {
-            $statsDiv = $('<div id="chapter-stats" class="postbox"><div class="inside"></div></div>');
-            $('#side-sortables').prepend($statsDiv);
+    function getChapterContent() {
+        // Try to get content from different editors
+        if (typeof tinyMCE !== 'undefined' && tinyMCE.get('content')) {
+            return tinyMCE.get('content').getContent();
+        } else if ($('#content').length) {
+            return $('#content').val();
         }
-        
-        $statsDiv.find('.inside').html(`
-            <h4>Chapter Statistics</h4>
-            <p><strong>Word Count:</strong> ${wordCount}</p>
-            <p><strong>Estimated Reading Time:</strong> ${readingTime} minute${readingTime !== 1 ? 's' : ''}</p>
-        `);
+        return '';
     }
     
-    // Calculate word count on content change
-    if ($('#content').length) {
-        // For classic editor
-        $('#content').on('input', function() {
-            clearTimeout($(this).data('timeout'));
-            $(this).data('timeout', setTimeout(calculateWordCount, 500));
-        });
+    function updateAudioDisplay(audioUrl) {
+        const $audioControls = $('.audio-meta-box .current-audio');
         
-        // For TinyMCE editor
-        $(document).on('tinymce-editor-init', function(event, editor) {
-            if (editor.id === 'content') {
-                editor.on('keyup change', function() {
-                    clearTimeout(editor.wordCountTimeout);
-                    editor.wordCountTimeout = setTimeout(calculateWordCount, 500);
-                });
-            }
-        });
-        
-        // Initial calculation
-        setTimeout(calculateWordCount, 1000);
-    }
-    
-    // Audio quality settings
-    if ($('#ebook_audio_url').length) {
-        $('#ebook_audio_url').after(`
-            <div class="audio-settings" style="margin-top: 10px;">
-                <label>
-                    <strong>Audio Settings:</strong>
-                </label>
-                <br>
-                <label>
-                    <input type="radio" name="audio_voice" value="male" checked> Male Voice
-                </label>
-                <label style="margin-left: 15px;">
-                    <input type="radio" name="audio_voice" value="female"> Female Voice
-                </label>
-                <br>
-                <label style="margin-top: 10px; display: block;">
-                    Speed: <input type="range" name="audio_speed" min="0.5" max="2" step="0.1" value="1" style="margin: 0 10px;">
-                    <span class="speed-display">1x</span>
-                </label>
-            </div>
-        `);
-        
-        // Update speed display
-        $('input[name="audio_speed"]').on('input', function() {
-            $('.speed-display').text($(this).val() + 'x');
-        });
-    }
-    
-    // Shortcode generator
-    if ($('.post-type-ebook').length) {
-        $('#titlediv').after(`
-            <div class="postbox">
-                <div class="postbox-header">
-                    <h2 class="hndle">Shortcode Generator</h2>
-                </div>
-                <div class="inside">
-                    <p>Use this shortcode to display the eBook slider:</p>
-                    <code class="shortcode-display">[ebook_slider book_id="${$('#post_ID').val()}" height="500px"]</code>
-                    <button type="button" class="button copy-shortcode" style="margin-left: 10px;">Copy</button>
-                    <div class="shortcode-options" style="margin-top: 15px;">
-                        <label>
-                            Height: <input type="text" class="shortcode-height" value="500px" style="width: 100px;">
-                        </label>
-                        <button type="button" class="button update-shortcode">Update Shortcode</button>
+        if (audioUrl) {
+            if ($audioControls.length) {
+                $audioControls.find('audio source').attr('src', audioUrl);
+                $audioControls.find('audio')[0].load();
+            } else {
+                const audioHtml = `
+                    <div class="current-audio">
+                        <label><strong>Current Audio:</strong></label><br>
+                        <audio controls preload="metadata" style="width: 100%; margin: 10px 0;">
+                            <source src="${audioUrl}" type="audio/mpeg">
+                            Your browser does not support the audio element.
+                        </audio>
+                        <p><a href="${audioUrl}" target="_blank">View Audio File</a></p>
                     </div>
-                </div>
+                `;
+                $('.audio-meta-box').prepend(audioHtml);
+            }
+        }
+    }
+    
+    function isValidUrl(string) {
+        try {
+            new URL(string);
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+    
+    function showAdminNotice(message, type = 'info') {
+        const $notice = $(`
+            <div class="notice notice-${type} ebook-admin-notice is-dismissible">
+                <p>${message}</p>
             </div>
         `);
         
-        // Update shortcode
-        $(document).on('click', '.update-shortcode', function() {
-            const postId = $('#post_ID').val();
-            const height = $('.shortcode-height').val();
-            const shortcode = `[ebook_slider book_id="${postId}" height="${height}"]`;
-            $('.shortcode-display').text(shortcode);
-        });
+        $('.wrap h1').after($notice);
         
-        // Copy shortcode
-        $(document).on('click', '.copy-shortcode', function() {
-            const shortcode = $('.shortcode-display').text();
-            navigator.clipboard.writeText(shortcode).then(function() {
-                showAdminNotice('Shortcode copied to clipboard!', 'success');
-            });
+        // Auto-dismiss after 5 seconds for success messages
+        if (type === 'success') {
+            setTimeout(function() {
+                $notice.fadeOut();
+            }, 5000);
+        }
+        
+        // Make dismissible
+        $notice.find('.notice-dismiss').on('click', function() {
+            $notice.fadeOut();
         });
     }
     
-    // Chapter template selector
-    if ($('#post-type-ebook_chapter').length || $('.post-type-ebook_chapter').length) {
-        $('#titlediv').after(`
-            <div class="postbox">
-                <div class="postbox-header">
-                    <h2 class="hndle">Chapter Template</h2>
-                </div>
-                <div class="inside">
-                    <select id="chapter-template" style="width: 100%;">
-                        <option value="">Select a template...</option>
-                        <option value="introduction">Introduction Chapter</option>
-                        <option value="content">Content Chapter</option>
-                        <option value="conclusion">Conclusion Chapter</option>
-                        <option value="appendix">Appendix</option>
-                    </select>
-                    <button type="button" class="button apply-template" style="margin-top: 10px;">Apply Template</button>
-                </div>
+    function showAdminTips() {
+        const tips = `
+            <div class="ebook-admin-notice notice-info">
+                <h3>📚 Welcome to eBook Chapter Management!</h3>
+                <p><strong>Quick Tips:</strong></p>
+                <ul>
+                    <li>✏️ Write your chapter content in the main editor</li>
+                    <li>📖 Select or create an eBook to organize your chapters</li>
+                    <li>🔢 Set chapter order to control the reading sequence</li>
+                    <li>🎵 Generate audio automatically from your text content</li>
+                    <li>👀 Use the shortcode <code>[ebook_slider ebook="your-ebook-slug"]</code> to display your eBook</li>
+                </ul>
+                <button type="button" class="notice-dismiss"><span class="screen-reader-text">Dismiss this notice.</span></button>
             </div>
-        `);
+        `;
         
-        // Apply chapter template
-        $(document).on('click', '.apply-template', function() {
-            const template = $('#chapter-template').val();
-            if (!template) {
-                alert('Please select a template first');
-                return;
-            }
-            
-            const templates = {
-                introduction: {
-                    title: 'Introduction',
-                    content: '<h2>Welcome</h2><p>This introductory chapter sets the stage for...</p><h3>What You Will Learn</h3><p>In this book, you will discover...</p>'
-                },
-                content: {
-                    title: 'Chapter Title',
-                    content: '<h2>Overview</h2><p>This chapter covers...</p><h3>Key Points</h3><ul><li>Point 1</li><li>Point 2</li><li>Point 3</li></ul><h3>Summary</h3><p>In summary...</p>'
-                },
-                conclusion: {
-                    title: 'Conclusion',
-                    content: '<h2>Summary</h2><p>Throughout this book, we have explored...</p><h3>Key Takeaways</h3><ul><li>Takeaway 1</li><li>Takeaway 2</li><li>Takeaway 3</li></ul><h3>Next Steps</h3><p>Now that you have completed this book...</p>'
-                },
-                appendix: {
-                    title: 'Appendix',
-                    content: '<h2>Additional Resources</h2><p>This appendix contains supplementary information...</p><h3>References</h3><ul><li>Reference 1</li><li>Reference 2</li></ul>'
-                }
-            };
-            
-            const selectedTemplate = templates[template];
-            
-            if (confirm('This will replace the current title and content. Are you sure?')) {
-                $('#title').val(selectedTemplate.title);
-                
-                if (typeof tinymce !== 'undefined' && tinymce.get('content')) {
-                    tinymce.get('content').setContent(selectedTemplate.content);
-                } else {
-                    $('#content').val(selectedTemplate.content);
-                }
-                
-                showAdminNotice('Template applied successfully!', 'success');
-            }
-        });
+        $('.wrap h1').after(tips);
     }
-    
+});
+
+// AJAX handler for adding new ebooks
+jQuery(document).ajaxSuccess(function(event, xhr, settings) {
+    if (settings.data && settings.data.indexOf('action=add_new_ebook') !== -1) {
+        // Refresh the ebook list if needed
+        console.log('eBook added successfully');
+    }
+});
+
+// Global error handler for ebook admin
+jQuery(document).ajaxError(function(event, xhr, settings, error) {
+    if (settings.data && settings.data.indexOf('ebook') !== -1) {
+        console.error('eBook AJAX Error:', error);
+    }
 });

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Interactive eBook Plugin
  * Description: Create interactive eBooks with chapters displayed in sliders and text-to-audio conversion
- * Version: 1.0.0
+ * Version: 2.0.0
  * Author: Your Name
  */
 
@@ -15,9 +15,10 @@ if (!defined('ABSPATH')) {
 define('EBOOK_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('EBOOK_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
-class InteractiveEBookPlugin {
-    
-    public function __construct() {
+class InteractiveEBookPlugin
+{
+    public function __construct()
+    {
         add_action('init', array($this, 'init'));
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
         add_action('admin_enqueue_scripts', array($this, 'admin_enqueue_scripts'));
@@ -26,44 +27,84 @@ class InteractiveEBookPlugin {
         add_shortcode('ebook_slider', array($this, 'ebook_slider_shortcode'));
         add_action('wp_ajax_convert_text_to_audio', array($this, 'convert_text_to_audio'));
         add_action('wp_ajax_nopriv_convert_text_to_audio', array($this, 'convert_text_to_audio'));
-        add_action('wp_ajax_get_ebooks_list', array($this, 'get_ebooks_list'));
-        add_action('wp_ajax_get_next_chapter_order', array($this, 'get_next_chapter_order'));
-        add_action('wp_ajax_save_chapter_order', array($this, 'save_chapter_order'));
         add_shortcode('ebook_chapters_debug', array($this, 'debug_chapters'));
+
+        // Add custom columns to admin
+        add_filter('manage_ebook_chapter_posts_columns', array($this, 'add_admin_columns'));
+        add_action('manage_ebook_chapter_posts_custom_column', array($this, 'display_admin_columns'), 10, 2);
+        add_filter('manage_edit-ebook_chapter_sortable_columns', array($this, 'make_columns_sortable'));
+
+        // Add audio settings page - THIS WAS MISSING
+        add_action('admin_menu', array($this, 'add_audio_settings_page'));
+        add_action('wp_ajax_test_audio_api', array($this, 'test_audio_api'));
+
         register_activation_hook(__FILE__, array($this, 'activate'));
     }
-    
-    public function init() {
+
+    public function init()
+    {
         $this->create_post_types();
         $this->create_taxonomies();
     }
-    
-    public function create_post_types() {
-        // Register Books post type
-        register_post_type('ebook', array(
-            'labels' => array(
-                'name' => 'eBooks',
-                'singular_name' => 'eBook',
-                'add_new' => 'Add New eBook',
-                'add_new_item' => 'Add New eBook',
-                'edit_item' => 'Edit eBook',
-                'new_item' => 'New eBook',
-                'view_item' => 'View eBook',
-                'search_items' => 'Search eBooks',
-                'not_found' => 'No eBooks found',
-                'not_found_in_trash' => 'No eBooks found in trash'
-            ),
-            'public' => true,
-            'has_archive' => true,
-            'menu_icon' => 'dashicons-book',
-            'supports' => array('title', 'editor', 'thumbnail', 'excerpt'),
-            'rewrite' => array('slug' => 'ebooks')
-        ));
+
+    public function debug_audio_generation($chapter_id) {
+        $chapter = get_post($chapter_id);
+        if (!$chapter) {
+            return ['error' => 'Chapter not found'];
+        }
         
-        // Register Chapters post type
+        $api_key = get_option('ebook_openai_api_key');
+        $text = strip_tags($chapter->post_content);
+        $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
+        $text = trim($text);
+        
+        $debug_info = [
+            'api_key_set' => !empty($api_key),
+            'api_key_length' => strlen($api_key),
+            'text_length' => strlen($text),
+            'text_word_count' => str_word_count($text),
+            'chapter_title' => $chapter->post_title,
+            'wp_upload_dir' => wp_upload_dir(),
+            'curl_version' => curl_version(),
+        ];
+        
+        // Test API connection
+        if (!empty($api_key)) {
+            $test_response = $this->test_openai_connection($api_key);
+            $debug_info['api_test'] = $test_response;
+        }
+        
+        return $debug_info;
+    }
+
+    private function test_openai_connection($api_key) {
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => "https://api.openai.com/v1/models",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                "Authorization: Bearer " . $api_key,
+            ],
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        
+        $response = curl_exec($curl);
+        $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        curl_close($curl);
+        
+        return [
+            'http_code' => $http_code,
+            'success' => $http_code === 200,
+            'response_preview' => substr($response, 0, 200)
+        ];
+    }
+
+    public function create_post_types()
+    {
+        // Register Chapters post type only
         register_post_type('ebook_chapter', array(
             'labels' => array(
-                'name' => 'Chapters',
+                'name' => 'eBook Chapters',
                 'singular_name' => 'Chapter',
                 'add_new' => 'Add New Chapter',
                 'add_new_item' => 'Add New Chapter',
@@ -75,296 +116,359 @@ class InteractiveEBookPlugin {
                 'not_found_in_trash' => 'No chapters found in trash'
             ),
             'public' => true,
-            'has_archive' => false,
-            'menu_icon' => 'dashicons-media-document',
-            'supports' => array('title', 'editor', 'page-attributes'),
-            'rewrite' => array('slug' => 'chapters')
+            'has_archive' => true,
+            'menu_icon' => 'dashicons-book',
+            'supports' => array('title', 'editor', 'thumbnail', 'excerpt', 'page-attributes'),
+            'rewrite' => array('slug' => 'chapters'),
+            'show_in_rest' => true, // For Gutenberg support
+            'taxonomies' => array('ebook') // Associate with ebook taxonomy
         ));
     }
-    
-    public function create_taxonomies() {
-        // Create taxonomy to link chapters to books
-        register_taxonomy('ebook_series', 'ebook_chapter', array(
+
+    public function create_taxonomies()
+    {
+        // Create ebook taxonomy
+        register_taxonomy('ebook', 'ebook_chapter', array(
             'hierarchical' => true,
             'labels' => array(
-                'name' => 'eBook Series',
-                'singular_name' => 'eBook Series',
+                'name' => 'eBooks',
+                'singular_name' => 'eBook',
+                'search_items' => 'Search eBooks',
+                'all_items' => 'All eBooks',
+                'parent_item' => 'Parent eBook',
+                'parent_item_colon' => 'Parent eBook:',
+                'edit_item' => 'Edit eBook',
+                'update_item' => 'Update eBook',
+                'add_new_item' => 'Add New eBook',
+                'new_item_name' => 'New eBook Name',
+                'menu_name' => 'eBooks',
             ),
             'show_ui' => true,
             'show_admin_column' => true,
+            'show_in_rest' => true,
             'query_var' => true,
-            'rewrite' => array('slug' => 'ebook-series'),
+            'rewrite' => array('slug' => 'ebook'),
+            'meta_box_cb' => array($this, 'ebook_meta_box') // Custom meta box for better UX
         ));
     }
-    
-    public function enqueue_scripts() {
+
+    // Custom meta box for ebook taxonomy selection
+    public function ebook_meta_box($post, $box)
+    {
+        $terms = wp_get_object_terms($post->ID, 'ebook');
+        $selected_term = !empty($terms) ? $terms[0]->term_id : '';
+
+        $all_ebooks = get_terms(array(
+            'taxonomy' => 'ebook',
+            'hide_empty' => false
+        ));
+
+        echo '<div id="taxonomy-ebook" class="categorydiv">';
+        echo '<div id="ebook-all" class="tabs-panel">';
+        echo '<ul id="ebookchecklist" class="categorychecklist form-no-clear">';
+        echo '<li><label><input type="radio" name="tax_input[ebook][]" value="" ' . checked('', $selected_term, false) . '> None</label></li>';
+
+        foreach ($all_ebooks as $ebook) {
+            echo '<li><label>';
+            echo '<input type="radio" name="tax_input[ebook][]" value="' . $ebook->term_id . '" ' . checked($ebook->term_id, $selected_term, false) . '> ';
+            echo esc_html($ebook->name);
+            echo '</label></li>';
+        }
+
+        echo '</ul></div></div>';
+
+        // Add new ebook option
+        echo '<div class="add-new-ebook" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">';
+        echo '<h4>Add New eBook:</h4>';
+        echo '<input type="text" id="new_ebook_name" placeholder="Enter new eBook name" style="width: 70%;" />';
+        echo '<button type="button" id="add_new_ebook" class="button" style="margin-left: 5px;">Add eBook</button>';
+        echo '</div>';
+    }
+
+    public function enqueue_scripts()
+    {
         wp_enqueue_script('jquery');
         wp_enqueue_script('swiper-js', 'https://cdn.jsdelivr.net/npm/swiper@8/swiper-bundle.min.js', array(), '8.0.0', true);
         wp_enqueue_style('swiper-css', 'https://cdn.jsdelivr.net/npm/swiper@8/swiper-bundle.min.css', array(), '8.0.0');
-        
-        wp_enqueue_script('ebook-plugin-js', EBOOK_PLUGIN_URL . 'assets/ebook-plugin.js', array('jquery', 'swiper-js'), '1.0.0', true);
-        wp_enqueue_style('ebook-plugin-css', EBOOK_PLUGIN_URL . 'assets/ebook-plugin.css', array('swiper-css'), '1.0.0');
-        
+
+        wp_enqueue_script('ebook-plugin-js', EBOOK_PLUGIN_URL . 'assets/ebook-plugin.js', array('jquery', 'swiper-js'), '2.0.0', true);
+        wp_enqueue_style('ebook-plugin-css', EBOOK_PLUGIN_URL . 'assets/ebook-plugin.css', array('swiper-css'), '2.0.0');
+
         wp_localize_script('ebook-plugin-js', 'ebook_ajax', array(
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('ebook_nonce')
         ));
     }
-    
-    public function admin_enqueue_scripts() {
-        wp_enqueue_script('ebook-admin-js', EBOOK_PLUGIN_URL . 'assets/ebook-admin.js', array('jquery'), '1.0.0', true);
-        wp_enqueue_style('ebook-admin-css', EBOOK_PLUGIN_URL . 'assets/ebook-admin.css', array(), '1.0.0');
+
+    public function admin_enqueue_scripts()
+    {
+        wp_enqueue_script('ebook-admin-js', EBOOK_PLUGIN_URL . 'assets/ebook-admin.js', array('jquery'), '2.0.0', true);
+        wp_enqueue_style('ebook-admin-css', EBOOK_PLUGIN_URL . 'assets/ebook-admin.css', array(), '2.0.0');
+
+        wp_localize_script('ebook-admin-js', 'ebook_admin_ajax', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('ebook_admin_nonce')
+        ));
     }
-    
-    public function add_meta_boxes() {
+
+    public function add_meta_boxes()
+    {
         add_meta_box(
-            'ebook_chapter_meta',
+            'ebook_chapter_details',
             'Chapter Details',
             array($this, 'chapter_meta_box_callback'),
             'ebook_chapter',
-            'normal',
+            'side',
             'high'
         );
-        
+
         add_meta_box(
-            'ebook_meta',
-            'eBook Details',
-            array($this, 'ebook_meta_box_callback'),
-            'ebook',
-            'normal',
-            'high'
+            'ebook_audio_controls',
+            'Audio Controls',
+            array($this, 'audio_meta_box_callback'),
+            'ebook_chapter',
+            'side',
+            'default'
         );
     }
-    
-    public function chapter_meta_box_callback($post) {
+
+    public function chapter_meta_box_callback($post)
+    {
         wp_nonce_field('ebook_chapter_meta_nonce', 'ebook_chapter_meta_nonce');
-        
-        $book_id = get_post_meta($post->ID, '_ebook_book_id', true);
+
         $chapter_order = get_post_meta($post->ID, '_ebook_chapter_order', true);
-        $audio_url = get_post_meta($post->ID, '_ebook_audio_url', true);
-        
-        $books = get_posts(array('post_type' => 'ebook', 'posts_per_page' => -1));
-        
-        echo '<table class="form-table">';
-        echo '<tr><th><label for="ebook_book_id">Select eBook:</label></th><td>';
-        echo '<select name="ebook_book_id" id="ebook_book_id">';
-        echo '<option value="">Select a book...</option>';
-        foreach ($books as $book) {
-            $selected = ($book_id == $book->ID) ? 'selected' : '';
-            echo '<option value="' . $book->ID . '" ' . $selected . '>' . $book->post_title . '</option>';
+        if (empty($chapter_order)) {
+            $chapter_order = $post->menu_order;
         }
-        echo '</select></td></tr>';
-        
-        echo '<tr><th><label for="ebook_chapter_order">Chapter Order:</label></th><td>';
-        echo '<input type="number" name="ebook_chapter_order" id="ebook_chapter_order" value="' . $chapter_order . '" min="1" /></td></tr>';
-        
-        echo '<tr><th><label for="ebook_audio_url">Audio URL:</label></th><td>';
-        echo '<input type="url" name="ebook_audio_url" id="ebook_audio_url" value="' . $audio_url . '" style="width: 100%;" />';
-        echo '<br><button type="button" id="generate_audio" class="button">Generate Audio from Content</button></td></tr>';
-        
-        echo '</table>';
-    }
-    
-    public function ebook_meta_box_callback($post) {
-        wp_nonce_field('ebook_meta_nonce', 'ebook_meta_nonce');
-        
-        $author = get_post_meta($post->ID, '_ebook_author', true);
-        $isbn = get_post_meta($post->ID, '_ebook_isbn', true);
-        $publication_date = get_post_meta($post->ID, '_ebook_publication_date', true);
-        
+
         echo '<table class="form-table">';
-        echo '<tr><th><label for="ebook_author">Author:</label></th><td>';
-        echo '<input type="text" name="ebook_author" id="ebook_author" value="' . $author . '" style="width: 100%;" /></td></tr>';
-        
-        echo '<tr><th><label for="ebook_isbn">ISBN:</label></th><td>';
-        echo '<input type="text" name="ebook_isbn" id="ebook_isbn" value="' . $isbn . '" /></td></tr>';
-        
-        echo '<tr><th><label for="ebook_publication_date">Publication Date:</label></th><td>';
-        echo '<input type="date" name="ebook_publication_date" id="ebook_publication_date" value="' . $publication_date . '" /></td></tr>';
-        
+        echo '<tr><th><label for="ebook_chapter_order">Chapter Order:</label></th><td>';
+        echo '<input type="number" name="ebook_chapter_order" id="ebook_chapter_order" value="' . $chapter_order . '" min="1" style="width: 100%;" />';
+        echo '<p class="description">Order of this chapter within the eBook</p>';
+        echo '</td></tr>';
         echo '</table>';
     }
-    
-    public function save_meta_boxes($post_id) {
-        if (!isset($_POST['ebook_chapter_meta_nonce']) && !isset($_POST['ebook_meta_nonce'])) {
+
+    public function audio_meta_box_callback($post)
+    {
+        $audio_url = get_post_meta($post->ID, '_ebook_audio_url', true);
+
+        echo '<div class="audio-meta-box">';
+
+        if ($audio_url) {
+            echo '<div class="current-audio">';
+            echo '<label><strong>Current Audio:</strong></label><br>';
+            echo '<audio controls style="width: 100%; margin: 10px 0;">';
+            echo '<source src="' . esc_url($audio_url) . '" type="audio/mpeg">';
+            echo 'Your browser does not support the audio element.';
+            echo '</audio>';
+            echo '<p><a href="' . esc_url($audio_url) . '" target="_blank">View Audio File</a></p>';
+            echo '</div>';
+        }
+
+        echo '<div class="audio-controls">';
+        echo '<button type="button" id="generate_audio" class="button button-primary" data-chapter-id="' . $post->ID . '">';
+        echo $audio_url ? 'Regenerate Audio' : 'Generate Audio';
+        echo '</button>';
+        echo '<div id="audio-generation-status" style="margin-top: 10px;"></div>';
+        echo '</div>';
+
+        echo '<div class="manual-audio-url" style="margin-top: 15px;">';
+        echo '<label for="ebook_audio_url"><strong>Or enter audio URL manually:</strong></label><br>';
+        echo '<input type="url" name="ebook_audio_url" id="ebook_audio_url" value="' . esc_attr($audio_url) . '" style="width: 100%;" placeholder="https://example.com/audio.mp3" />';
+        echo '</div>';
+
+        echo '</div>';
+    }
+
+    public function save_meta_boxes($post_id)
+    {
+        // Check for chapter meta nonce
+        if (!isset($_POST['ebook_chapter_meta_nonce']) || !wp_verify_nonce($_POST['ebook_chapter_meta_nonce'], 'ebook_chapter_meta_nonce')) {
             return;
         }
-        
-        if (isset($_POST['ebook_chapter_meta_nonce'])) {
-            if (!wp_verify_nonce($_POST['ebook_chapter_meta_nonce'], 'ebook_chapter_meta_nonce')) {
-                return;
-            }
-            
-            if (isset($_POST['ebook_book_id'])) {
-                update_post_meta($post_id, '_ebook_book_id', sanitize_text_field($_POST['ebook_book_id']));
-            }
-            
-            if (isset($_POST['ebook_chapter_order'])) {
-                update_post_meta($post_id, '_ebook_chapter_order', intval($_POST['ebook_chapter_order']));
-            }
-            
-            if (isset($_POST['ebook_audio_url'])) {
-                update_post_meta($post_id, '_ebook_audio_url', esc_url($_POST['ebook_audio_url']));
-            }
+
+        // Check if user has permission to edit the post
+        if (!current_user_can('edit_post', $post_id)) {
+            return;
         }
-        
-        if (isset($_POST['ebook_meta_nonce'])) {
-            if (!wp_verify_nonce($_POST['ebook_meta_nonce'], 'ebook_meta_nonce')) {
-                return;
-            }
-            
-            if (isset($_POST['ebook_author'])) {
-                update_post_meta($post_id, '_ebook_author', sanitize_text_field($_POST['ebook_author']));
-            }
-            
-            if (isset($_POST['ebook_isbn'])) {
-                update_post_meta($post_id, '_ebook_isbn', sanitize_text_field($_POST['ebook_isbn']));
-            }
-            
-            if (isset($_POST['ebook_publication_date'])) {
-                update_post_meta($post_id, '_ebook_publication_date', sanitize_text_field($_POST['ebook_publication_date']));
-            }
+
+        // Save chapter order
+        if (isset($_POST['ebook_chapter_order'])) {
+            $order = intval($_POST['ebook_chapter_order']);
+            update_post_meta($post_id, '_ebook_chapter_order', $order);
+            // Also update menu_order for native WordPress ordering
+            wp_update_post(array(
+                'ID' => $post_id,
+                'menu_order' => $order
+            ));
+        }
+
+        // Save audio URL
+        if (isset($_POST['ebook_audio_url'])) {
+            update_post_meta($post_id, '_ebook_audio_url', esc_url($_POST['ebook_audio_url']));
         }
     }
-    
-    public function ebook_slider_shortcode($atts) {
+
+    // Add custom columns to admin list
+    public function add_admin_columns($columns)
+    {
+        $new_columns = array();
+        $new_columns['cb'] = $columns['cb'];
+        $new_columns['title'] = $columns['title'];
+        $new_columns['ebook'] = 'eBook';
+        $new_columns['chapter_order'] = 'Order';
+        $new_columns['audio_status'] = 'Audio';
+        $new_columns['date'] = $columns['date'];
+
+        return $new_columns;
+    }
+
+    public function display_admin_columns($column, $post_id)
+    {
+        switch ($column) {
+            case 'chapter_order':
+                $order = get_post_meta($post_id, '_ebook_chapter_order', true);
+                echo $order ? $order : get_post($post_id)->menu_order;
+                break;
+
+            case 'audio_status':
+                $audio_url = get_post_meta($post_id, '_ebook_audio_url', true);
+                if ($audio_url) {
+                    echo '<span style="color: green;">✓ Available</span>';
+                } else {
+                    echo '<span style="color: #ccc;">No Audio</span>';
+                }
+                break;
+        }
+    }
+
+    public function make_columns_sortable($columns)
+    {
+        $columns['chapter_order'] = 'menu_order';
+        return $columns;
+    }
+
+    public function ebook_slider_shortcode($atts)
+    {
         $atts = shortcode_atts(array(
-            'book_id' => '',
+            'ebook' => '', // ebook slug or ID
             'height' => '500px'
         ), $atts);
-        
-        if (empty($atts['book_id'])) {
-            return '<p>Please specify a book ID for the slider.</p>';
+
+        if (empty($atts['ebook'])) {
+            return '<p>Please specify an ebook slug or ID for the slider.</p>';
         }
-        
-        // Debug: Check if book exists
-        $book = get_post($atts['book_id']);
-        if (!$book || $book->post_type !== 'ebook') {
-            return '<p>Invalid book ID or book not found.</p>';
+
+        // Get ebook term
+        $ebook_term = null;
+        if (is_numeric($atts['ebook'])) {
+            $ebook_term = get_term($atts['ebook'], 'ebook');
+        } else {
+            $ebook_term = get_term_by('slug', $atts['ebook'], 'ebook');
         }
-        
-        // Try multiple methods to find chapters
-        $chapters = array();
-        
-        // Method 1: Query by meta value
+
+        if (!$ebook_term) {
+            return '<p>eBook not found. Please check the ebook slug or ID.</p>';
+        }
+
+        // Get chapters for this ebook
         $chapters = get_posts(array(
             'post_type' => 'ebook_chapter',
             'posts_per_page' => -1,
             'post_status' => 'publish',
-            'meta_query' => array(
+            'tax_query' => array(
                 array(
-                    'key' => '_ebook_book_id',
-                    'value' => $atts['book_id'],
-                    'compare' => '='
-                )
+                    'taxonomy' => 'ebook',
+                    'field' => 'term_id',
+                    'terms' => $ebook_term->term_id,
+                ),
             ),
             'meta_key' => '_ebook_chapter_order',
-            'orderby' => 'meta_value_num',
+            'orderby' => 'meta_value_num menu_order',
             'order' => 'ASC'
         ));
-        
-        // Method 2: If no chapters found, try without meta_key ordering
+
         if (empty($chapters)) {
-            $chapters = get_posts(array(
-                'post_type' => 'ebook_chapter',
-                'posts_per_page' => -1,
-                'post_status' => 'publish',
-                'meta_query' => array(
-                    array(
-                        'key' => '_ebook_book_id',
-                        'value' => $atts['book_id'],
-                        'compare' => '='
-                    )
-                ),
-                'orderby' => 'menu_order',
-                'order' => 'ASC'
-            ));
-        }
-        
-        // Method 3: If still no chapters, get all chapters and filter
-        if (empty($chapters)) {
-            $all_chapters = get_posts(array(
-                'post_type' => 'ebook_chapter',
-                'posts_per_page' => -1,
-                'post_status' => 'publish'
-            ));
-            
-            foreach ($all_chapters as $chapter) {
-                $chapter_book_id = get_post_meta($chapter->ID, '_ebook_book_id', true);
-                if ($chapter_book_id == $atts['book_id']) {
-                    $chapters[] = $chapter;
-                }
-            }
-        }
-        
-        // Debug information
-        $debug_info = '';
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            $debug_info = '<!-- Debug: Book ID: ' . $atts['book_id'] . ', Chapters found: ' . count($chapters) . ' -->';
-        }
-        
-        if (empty($chapters)) {
-            return $debug_info . '<div class="ebook-no-chapters">
-                <h3>No chapters found for this book.</h3>
+            return '<div class="ebook-no-chapters">
+                <h3>No chapters found for this eBook.</h3>
                 <p>Please check:</p>
                 <ul>
                     <li>Chapters are published</li>
-                    <li>Chapters are assigned to this book (ID: ' . esc_html($atts['book_id']) . ')</li>
-                    <li>Book ID is correct</li>
+                    <li>Chapters are assigned to the "' . esc_html($ebook_term->name) . '" eBook</li>
+                    <li>eBook slug/ID is correct</li>
                 </ul>
-                <p><strong>Book:</strong> ' . esc_html($book->post_title) . '</p>
             </div>';
         }
-        
-        $book = get_post($atts['book_id']);
-        
+
         ob_start();
         ?>
         <div class="ebook-container">
             <div class="ebook-header">
-                <h2><?php echo esc_html($book->post_title); ?></h2>
+                <h2><?php echo esc_html($ebook_term->name); ?></h2>
+                <?php if ($ebook_term->description): ?>
+                    <p class="ebook-description"><?php echo esc_html($ebook_term->description); ?></p>
+                <?php endif; ?>
                 <div class="ebook-controls">
                     <button class="ebook-btn ebook-prev">Previous</button>
                     <span class="ebook-progress">
-                        <span class="current-chapter">1</span> / <span class="total-chapters"><?php echo count($chapters); ?></span>
+                        <span class="current-chapter">1</span> / <span
+                            class="total-chapters"><?php echo count($chapters); ?></span>
                     </span>
                     <button class="ebook-btn ebook-next">Next</button>
                 </div>
             </div>
-            
+
             <div class="swiper ebook-slider" style="height: <?php echo esc_attr($atts['height']); ?>;">
                 <div class="swiper-wrapper">
                     <?php foreach ($chapters as $index => $chapter): ?>
                         <?php
                         $audio_url = get_post_meta($chapter->ID, '_ebook_audio_url', true);
+                        $chapter_order = get_post_meta($chapter->ID, '_ebook_chapter_order', true);
+                        if (!$chapter_order) {
+                            $chapter_order = $chapter->menu_order;
+                        }
                         ?>
-                        <div class="swiper-slide ebook-chapter" data-chapter="<?php echo $index + 1; ?>">
+                        <div class="swiper-slide ebook-chapter" data-chapter="<?php echo $index + 1; ?>"
+                            data-chapter-id="<?php echo $chapter->ID; ?>">
                             <div class="chapter-content">
-                                <h3 class="chapter-title"><?php echo esc_html($chapter->post_title); ?></h3>
-                                
-                                <?php if ($audio_url): ?>
-                                <div class="audio-controls">
-                                    <audio controls preload="none">
-                                        <source src="<?php echo esc_url($audio_url); ?>" type="audio/mpeg">
-                                        Your browser does not support the audio element.
-                                    </audio>
-                                    <button class="generate-audio-btn" data-chapter-id="<?php echo $chapter->ID; ?>">Regenerate Audio</button>
+                                <div class="chapter-header">
+                                    <h3 class="chapter-title">
+                                        <?php if ($chapter_order): ?>
+                                            <span class="chapter-number">Chapter <?php echo $chapter_order; ?>:</span>
+                                        <?php endif; ?>
+                                        <?php echo esc_html($chapter->post_title); ?>
+                                    </h3>
+
+                                    <?php if ($audio_url): ?>
+                                        <div class="audio-controls">
+                                            <audio controls preload="none">
+                                                <source src="<?php echo esc_url($audio_url); ?>" type="audio/mpeg">
+                                                Your browser does not support the audio element.
+                                            </audio>
+                                            <button class="generate-audio-btn" data-chapter-id="<?php echo $chapter->ID; ?>">Regenerate
+                                                Audio</button>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="audio-controls">
+                                            <button class="generate-audio-btn" data-chapter-id="<?php echo $chapter->ID; ?>">Generate
+                                                Audio</button>
+                                        </div>
+                                    <?php endif; ?>
                                 </div>
-                                <?php else: ?>
-                                <div class="audio-controls">
-                                    <button class="generate-audio-btn" data-chapter-id="<?php echo $chapter->ID; ?>">Generate Audio</button>
-                                </div>
-                                <?php endif; ?>
-                                
+
                                 <div class="chapter-text">
-                                    <?php echo wp_kses_post($chapter->post_content); ?>
+                                    <?php
+                                    // Apply content filters for proper formatting
+                                    echo apply_filters('the_content', $chapter->post_content);
+                                    ?>
                                 </div>
                             </div>
                         </div>
                     <?php endforeach; ?>
                 </div>
             </div>
-            
+
             <div class="ebook-pagination">
                 <div class="swiper-pagination"></div>
             </div>
@@ -372,174 +476,494 @@ class InteractiveEBookPlugin {
         <?php
         return ob_get_clean();
     }
-    
-    public function convert_text_to_audio() {
+
+    public function convert_text_to_audio()
+    {
         if (!wp_verify_nonce($_POST['nonce'], 'ebook_nonce')) {
             wp_die('Security check failed');
         }
-        
+
         $chapter_id = intval($_POST['chapter_id']);
         $chapter = get_post($chapter_id);
-        
-        if (!$chapter) {
+
+        if (!$chapter || $chapter->post_type !== 'ebook_chapter') {
             wp_send_json_error('Chapter not found');
         }
-        
+
         // Strip HTML tags from content
         $text = strip_tags($chapter->post_content);
         $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
-        
-        // For demo purposes, we'll use a simple text-to-speech API
-        // In production, you might use services like AWS Polly, Google Text-to-Speech, etc.
-        
-        // Simulate audio generation (replace with actual API call)
-        $audio_data = $this->generate_audio_simulation($text);
-        
-        if ($audio_data) {
-            // Save audio file
-            $upload_dir = wp_upload_dir();
-            $audio_filename = 'chapter-' . $chapter_id . '-' . time() . '.mp3';
-            $audio_path = $upload_dir['path'] . '/' . $audio_filename;
-            $audio_url = $upload_dir['url'] . '/' . $audio_filename;
-            
-            // In a real implementation, you would save the actual audio data
-            // file_put_contents($audio_path, $audio_data);
-            
-            // For demo, we'll just save a placeholder URL
+        $text = trim($text);
+
+        if (empty($text)) {
+            wp_send_json_error('No text content found in chapter');
+        }
+
+        // Generate audio using OpenAI TTS
+        $audio_url = $this->generate_audio_simulation($text, $chapter_id);
+
+        if ($audio_url) {
             update_post_meta($chapter_id, '_ebook_audio_url', $audio_url);
-            
+
             wp_send_json_success(array(
                 'audio_url' => $audio_url,
                 'message' => 'Audio generated successfully!'
             ));
         } else {
-            wp_send_json_error('Failed to generate audio');
+            wp_send_json_error('Failed to generate audio. Please check your OpenAI API key in Audio Settings and ensure you have credits available.');
         }
     }
-    
-    private function generate_audio_simulation($text) {
-        // This is a simulation function
-        // In a real implementation, you would integrate with actual text-to-speech services
-        
-        // Example with AWS Polly (requires AWS SDK):
-        /*
-        try {
-            $polly = new Aws\Polly\PollyClient([
-                'version' => 'latest',
-                'region' => 'us-west-2'
-            ]);
-            
-            $result = $polly->synthesizeSpeech([
-                'Text' => $text,
-                'OutputFormat' => 'mp3',
-                'VoiceId' => 'Joanna'
-            ]);
-            
-            return $result['AudioStream']->getContents();
-        } catch (Exception $e) {
+
+    private function generate_audio_simulation($text, $chapter_id) {
+        $openai_api_key = get_option('ebook_openai_api_key');
+        if (empty($openai_api_key)) {
+            error_log("❌ OpenAI API key not found. Please configure it in Audio Settings.");
             return false;
         }
-        */
+
+        // Limit text length to prevent API errors (OpenAI TTS has a 4096 character limit)
+        if (strlen($text) > 4000) {
+            $text = substr($text, 0, 4000) . '...';
+        }
+
+        $upload_dir = wp_upload_dir();
+        $audio_filename = 'chapter-' . $chapter_id . '-' . time() . '.mp3';
+        $audio_path = $upload_dir['path'] . '/' . $audio_filename;
+        $audio_url  = $upload_dir['url']  . '/' . $audio_filename;
+
+        // Get voice and model from settings
+        $voice = get_option('ebook_tts_voice', 'alloy');
+        $model = get_option('ebook_tts_model', 'tts-1');
+
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => "https://api.openai.com/v1/audio/speech",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => [
+                "Authorization: Bearer " . $openai_api_key,
+                "Content-Type: application/json"
+            ],
+            CURLOPT_POSTFIELDS => json_encode([
+                "model" => $model,
+                "input" => $text,
+                "voice" => $voice,
+                "response_format" => "mp3"
+            ]),
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
+
+        $response = curl_exec($curl);
+        $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $error = curl_error($curl);
+        curl_close($curl);
+
+        // Enhanced error handling
+        if ($error) {
+            error_log("❌ cURL Error: " . $error);
+            return false;
+        }
+
+        if ($http_code === 200 && !empty($response)) {
+            // Check if response is actually audio data
+            $file_header = substr($response, 0, 10);
+            
+            // MP3 files start with ID3 tags or FF sync byte
+            if (strpos($file_header, 'ID3') === 0 || (ord($file_header[0]) === 0xFF && (ord($file_header[1]) & 0xE0) === 0xE0)) {
+                if (file_put_contents($audio_path, $response)) {
+                    error_log("✅ Audio generated successfully: " . $audio_url);
+                    return $audio_url;
+                } else {
+                    error_log("❌ Failed to save audio file to: " . $audio_path);
+                }
+            } else {
+                error_log("❌ Invalid audio response. Response preview: " . substr($response, 0, 200));
+                
+                // Try to decode as JSON error
+                $json_response = json_decode($response, true);
+                if ($json_response && isset($json_response['error'])) {
+                    error_log("❌ OpenAI API Error: " . $json_response['error']['message']);
+                }
+            }
+        } else {
+            $error_response = json_decode($response, true);
+            if ($error_response && isset($error_response['error'])) {
+                $error_message = $error_response['error']['message'];
+                error_log("❌ OpenAI API Error (HTTP $http_code): " . $error_message);
+            } else {
+                error_log("❌ OpenAI API Error (HTTP $http_code): " . substr($response, 0, 200));
+            }
+        }
+
+        return false;
+    }
+
+    // Add audio settings page
+    public function add_audio_settings_page() {
+        add_submenu_page(
+            'edit.php?post_type=ebook_chapter',
+            'Audio Settings',
+            'Audio Settings',
+            'manage_options',
+            'ebook-audio-settings',
+            array($this, 'render_audio_settings_page')
+        );
+    }
+
+    public function render_audio_settings_page() {
+        if (isset($_POST['submit'])) {
+            update_option('ebook_openai_api_key', sanitize_text_field($_POST['openai_api_key']));
+            update_option('ebook_tts_voice', sanitize_text_field($_POST['tts_voice']));
+            update_option('ebook_tts_model', sanitize_text_field($_POST['tts_model']));
+            echo '<div class="notice notice-success"><p>Settings saved!</p></div>';
+        }
         
-        // For demo purposes, return true to simulate success
-        return true;
+        $api_key = get_option('ebook_openai_api_key', '');
+        $voice = get_option('ebook_tts_voice', 'alloy');
+        $model = get_option('ebook_tts_model', 'tts-1');
+        
+        ?>
+        <div class="wrap">
+            <h1>eBook Audio Settings</h1>
+            
+            <div class="notice notice-info">
+                <p><strong>Important:</strong> You need an OpenAI API key to generate audio. Get one from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.</p>
+                <p>Make sure your OpenAI account has available credits. TTS-1 costs $15.00 per 1M characters.</p>
+            </div>
+            
+            <form method="post" action="">
+                <?php wp_nonce_field('ebook_audio_settings', 'ebook_audio_nonce'); ?>
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">OpenAI API Key</th>
+                        <td>
+                            <input type="password" name="openai_api_key" value="<?php echo esc_attr($api_key); ?>" class="regular-text" />
+                            <p class="description">Your OpenAI API key (starts with sk-...)</p>
+                            <?php if (!empty($api_key)): ?>
+                                <p style="color: green;">✓ API Key is set</p>
+                            <?php else: ?>
+                                <p style="color: red;">⚠ No API Key configured</p>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Voice</th>
+                        <td>
+                            <select name="tts_model">
+                                <option value="tts-1" <?php selected($model, 'tts-1'); ?>>TTS-1 (Standard - $15/1M chars)</option>
+                                <option value="tts-1-hd" <?php selected($model, 'tts-1-hd'); ?>>TTS-1-HD (Higher Quality - $30/1M chars)</option>
+                            </select>
+                            <p class="description">TTS-1-HD provides higher quality but costs twice as much</p>
+                        </td>
+                    </tr>
+                </table>
+                
+                <?php submit_button(); ?>
+            </form>
+            
+            <h2>Test Audio Generation</h2>
+            <button id="test-audio-generation" class="button">Test API Connection</button>
+            <div id="test-results"></div>
+            
+            <h2>Bulk Operations</h2>
+            <p>Generate audio for all chapters in an eBook at once.</p>
+            <select id="bulk-ebook-select">
+                <option value="">Select an eBook...</option>
+                <?php
+                $ebooks = get_terms(array(
+                    'taxonomy' => 'ebook',
+                    'hide_empty' => false
+                ));
+                foreach ($ebooks as $ebook) {
+                    $chapter_count = wp_count_posts('ebook_chapter');
+                    echo '<option value="' . $ebook->term_id . '">' . esc_html($ebook->name) . '</option>';
+                }
+                ?>
+            </select>
+            <button id="bulk-generate-audio" class="button" disabled>Generate All Audio</button>
+            <div id="bulk-progress" style="margin-top: 10px;"></div>
+        </div>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            // Test API connection
+            $('#test-audio-generation').click(function() {
+                var $button = $(this);
+                var $results = $('#test-results');
+                
+                $button.prop('disabled', true).text('Testing...');
+                $results.html('<p>Testing API connection...</p>');
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'test_audio_api',
+                        nonce: '<?php echo wp_create_nonce('test_audio_api'); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            $results.html('<div class="notice notice-success"><p>✅ API connection successful!</p></div>');
+                        } else {
+                            $results.html('<div class="notice notice-error"><p>❌ ' + response.data + '</p></div>');
+                        }
+                    },
+                    complete: function() {
+                        $button.prop('disabled', false).text('Test API Connection');
+                    }
+                });
+            });
+            
+            // Enable bulk generate when ebook is selected
+            $('#bulk-ebook-select').change(function() {
+                $('#bulk-generate-audio').prop('disabled', !$(this).val());
+            });
+            
+            // Bulk generate audio
+            $('#bulk-generate-audio').click(function() {
+                var ebookId = $('#bulk-ebook-select').val();
+                var $button = $(this);
+                var $progress = $('#bulk-progress');
+                
+                if (!ebookId) return;
+                
+                $button.prop('disabled', true).text('Generating...');
+                $progress.html('<div class="notice notice-info"><p>🔄 Starting bulk audio generation...</p></div>');
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'bulk_generate_audio',
+                        ebook_id: ebookId,
+                        nonce: '<?php echo wp_create_nonce('ebook_nonce'); ?>'
+                    },
+                    timeout: 300000, // 5 minutes
+                    success: function(response) {
+                        if (response.success) {
+                            var summary = response.data.summary;
+                            var html = '<div class="notice notice-success">';
+                            html += '<p>✅ Bulk generation complete!</p>';
+                            html += '<p>Success: ' + summary.success + ' | Errors: ' + summary.errors + ' | Skipped: ' + summary.skipped + '</p>';
+                            html += '</div>';
+                            $progress.html(html);
+                        } else {
+                            $progress.html('<div class="notice notice-error"><p>❌ ' + response.data + '</p></div>');
+                        }
+                    },
+                    error: function() {
+                        $progress.html('<div class="notice notice-error"><p>❌ Request failed</p></div>');
+                    },
+                    complete: function() {
+                        $button.prop('disabled', false).text('Generate All Audio');
+                    }
+                });
+            });
+        });
+        </script>
+        <?php
     }
-    
-    public function activate() {
-        $this->create_post_types();
-        flush_rewrite_rules();
+
+    // AJAX handler for testing API
+    public function test_audio_api() {
+        if (!wp_verify_nonce($_POST['nonce'], 'test_audio_api')) {
+            wp_send_json_error('Security check failed');
+        }
+        
+        $api_key = get_option('ebook_openai_api_key');
+        if (empty($api_key)) {
+            wp_send_json_error('No API key configured');
+        }
+        
+        $test_result = $this->test_openai_connection($api_key);
+        
+        if ($test_result['success']) {
+            wp_send_json_success('API connection successful');
+        } else {
+            wp_send_json_error('API connection failed: HTTP ' . $test_result['http_code']);
+        }
     }
-    
-    // AJAX handler for getting ebooks list
-    public function get_ebooks_list() {
+
+    // Bulk generate audio for all chapters in an eBook
+    public function bulk_generate_audio() {
         if (!wp_verify_nonce($_POST['nonce'], 'ebook_nonce')) {
             wp_die('Security check failed');
         }
         
-        $books = get_posts(array(
-            'post_type' => 'ebook',
-            'posts_per_page' => -1,
-            'post_status' => 'publish'
-        ));
-        
-        wp_send_json_success(array('books' => $books));
-    }
-    
-    // AJAX handler for getting next chapter order
-    public function get_next_chapter_order() {
-        if (!wp_verify_nonce($_POST['nonce'], 'ebook_nonce')) {
-            wp_die('Security check failed');
-        }
-        
-        $book_id = intval($_POST['book_id']);
+        $ebook_id = intval($_POST['ebook_id']);
         
         $chapters = get_posts(array(
             'post_type' => 'ebook_chapter',
             'posts_per_page' => -1,
-            'meta_query' => array(
+            'post_status' => 'publish',
+            'tax_query' => array(
                 array(
-                    'key' => '_ebook_book_id',
-                    'value' => $book_id,
-                    'compare' => '='
-                )
-            )
+                    'taxonomy' => 'ebook',
+                    'field' => 'term_id',
+                    'terms' => $ebook_id,
+                ),
+            ),
+            'meta_key' => '_ebook_chapter_order',
+            'orderby' => 'meta_value_num',
+            'order' => 'ASC'
         ));
         
-        $next_order = count($chapters) + 1;
+        $results = [];
+        $success_count = 0;
+        $error_count = 0;
+        $skipped_count = 0;
         
-        wp_send_json_success(array('next_order' => $next_order));
-    }
-    
-    // AJAX handler for saving chapter order
-    public function save_chapter_order() {
-        if (!wp_verify_nonce($_POST['nonce'], 'ebook_nonce')) {
-            wp_die('Security check failed');
+        foreach ($chapters as $chapter) {
+            $existing_audio = get_post_meta($chapter->ID, '_ebook_audio_url', true);
+            if (!empty($existing_audio)) {
+                $skipped_count++;
+                continue; // Skip if audio already exists
+            }
+            
+            $text = strip_tags($chapter->post_content);
+            $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
+            $text = trim($text);
+            
+            if (empty($text)) {
+                $error_count++;
+                continue;
+            }
+            
+            $audio_url = $this->generate_audio_simulation($text, $chapter->ID);
+            
+            if ($audio_url) {
+                update_post_meta($chapter->ID, '_ebook_audio_url', $audio_url);
+                $success_count++;
+            } else {
+                $error_count++;
+            }
+            
+            // Add delay to avoid rate limiting
+            sleep(1);
         }
         
-        $post_id = intval($_POST['post_id']);
-        $order = intval($_POST['order']);
-        
-        update_post_meta($post_id, '_ebook_chapter_order', $order);
-        
-        wp_send_json_success(array('message' => 'Order saved'));
+        wp_send_json_success([
+            'summary' => [
+                'total' => count($chapters),
+                'success' => $success_count,
+                'errors' => $error_count,
+                'skipped' => $skipped_count
+            ]
+        ]);
     }
-    
+
     // Debug shortcode to check chapters
-    public function debug_chapters($atts) {
+    public function debug_chapters($atts)
+    {
         $atts = shortcode_atts(array(
-            'book_id' => ''
+            'ebook' => ''
         ), $atts);
-        
-        if (empty($atts['book_id'])) {
-            return '<p>Please specify a book ID.</p>';
+
+        if (empty($atts['ebook'])) {
+            return '<p>Please specify an ebook slug or ID.</p>';
         }
-        
-        $book = get_post($atts['book_id']);
+
+        // Get ebook term
+        $ebook_term = null;
+        if (is_numeric($atts['ebook'])) {
+            $ebook_term = get_term($atts['ebook'], 'ebook');
+        } else {
+            $ebook_term = get_term_by('slug', $atts['ebook'], 'ebook');
+        }
+
         $chapters = get_posts(array(
             'post_type' => 'ebook_chapter',
             'posts_per_page' => -1,
             'post_status' => array('publish', 'draft')
         ));
-        
+
         $output = '<div class="ebook-debug">';
         $output .= '<h3>Debug Information</h3>';
-        $output .= '<p><strong>Book ID:</strong> ' . $atts['book_id'] . '</p>';
-        $output .= '<p><strong>Book Title:</strong> ' . ($book ? $book->post_title : 'Not found') . '</p>';
+        $output .= '<p><strong>eBook:</strong> ' . $atts['ebook'] . '</p>';
+        $output .= '<p><strong>eBook Term:</strong> ' . ($ebook_term ? $ebook_term->name . ' (ID: ' . $ebook_term->term_id . ')' : 'Not found') . '</p>';
         $output .= '<p><strong>Total Chapters:</strong> ' . count($chapters) . '</p>';
-        
+
+        if ($ebook_term) {
+            $ebook_chapters = get_posts(array(
+                'post_type' => 'ebook_chapter',
+                'posts_per_page' => -1,
+                'tax_query' => array(
+                    array(
+                        'taxonomy' => 'ebook',
+                        'field' => 'term_id',
+                        'terms' => $ebook_term->term_id,
+                    ),
+                )
+            ));
+            $output .= '<p><strong>Chapters in this eBook:</strong> ' . count($ebook_chapters) . '</p>';
+        }
+
         $output .= '<h4>All Chapters:</h4><ul>';
         foreach ($chapters as $chapter) {
-            $chapter_book_id = get_post_meta($chapter->ID, '_ebook_book_id', true);
+            $chapter_ebooks = wp_get_object_terms($chapter->ID, 'ebook', array('fields' => 'names'));
             $chapter_order = get_post_meta($chapter->ID, '_ebook_chapter_order', true);
-            $assigned = ($chapter_book_id == $atts['book_id']) ? '✓' : '✗';
-            
-            $output .= '<li>' . $assigned . ' ' . $chapter->post_title . ' (ID: ' . $chapter->ID . ', Book ID: ' . $chapter_book_id . ', Order: ' . $chapter_order . ', Status: ' . $chapter->post_status . ')</li>';
+            $audio_url = get_post_meta($chapter->ID, '_ebook_audio_url', true);
+
+            $output .= '<li>';
+            $output .= '<strong>' . $chapter->post_title . '</strong> (ID: ' . $chapter->ID . ')';
+            $output .= '<br>eBooks: ' . (empty($chapter_ebooks) ? 'None' : implode(', ', $chapter_ebooks));
+            $output .= '<br>Order: ' . ($chapter_order ? $chapter_order : $chapter->menu_order);
+            $output .= '<br>Status: ' . $chapter->post_status;
+            $output .= '<br>Audio: ' . ($audio_url ? '✓' : '✗');
+            $output .= '</li>';
+        }
+        $output .= '</ul>';
+
+        // List all ebooks
+        $all_ebooks = get_terms(array(
+            'taxonomy' => 'ebook',
+            'hide_empty' => false
+        ));
+
+        $output .= '<h4>All eBooks:</h4><ul>';
+        foreach ($all_ebooks as $ebook) {
+            $chapter_count = get_posts(array(
+                'post_type' => 'ebook_chapter',
+                'posts_per_page' => -1,
+                'tax_query' => array(
+                    array(
+                        'taxonomy' => 'ebook',
+                        'field' => 'term_id',
+                        'terms' => $ebook->term_id,
+                    ),
+                ),
+                'fields' => 'ids'
+            ));
+
+            $output .= '<li>' . $ebook->name . ' (ID: ' . $ebook->term_id . ', Slug: ' . $ebook->slug . ') - ' . count($chapter_count) . ' chapters</li>';
         }
         $output .= '</ul></div>';
-        
+
         return $output;
+    }
+
+    public function activate()
+    {
+        $this->create_post_types();
+        $this->create_taxonomies();
+        flush_rewrite_rules();
     }
 }
 
 // Initialize the plugin
-new InteractiveEBookPlugin();
+new InteractiveEBookPlugin();voice">
+                                <option value="alloy" <?php selected($voice, 'alloy'); ?>>Alloy (Neutral)</option>
+                                <option value="echo" <?php selected($voice, 'echo'); ?>>Echo (Male)</option>
+                                <option value="fable" <?php selected($voice, 'fable'); ?>>Fable (British Male)</option>
+                                <option value="onyx" <?php selected($voice, 'onyx'); ?>>Onyx (Deep Male)</option>
+                                <option value="nova" <?php selected($voice, 'nova'); ?>>Nova (Female)</option>
+                                <option value="shimmer" <?php selected($voice, 'shimmer'); ?>>Shimmer (Soft Female)</option>
+                            </select>
+                            <p class="description">Choose the voice for text-to-speech</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">TTS Model</th>
+                        <td>
+                            <select name="tts_

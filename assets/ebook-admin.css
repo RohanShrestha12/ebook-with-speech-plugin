@@ -1,484 +1,351 @@
-/* EBook Plugin Admin CSS */
+/* ebook-admin.css - Admin Styles */
 
-/* Meta box styling */
-.ebook-meta-box table.form-table {
-    width: 100%;
-    border-collapse: collapse;
+/* Meta Box Styles */
+.audio-meta-box {
+    padding: 10px 0;
 }
 
-.ebook-meta-box table.form-table th {
-    width: 150px;
-    padding: 15px 10px;
-    font-weight: 600;
+.audio-meta-box .current-audio {
+    margin-bottom: 20px;
+    padding: 15px;
     background: #f9f9f9;
-    border-bottom: 1px solid #e0e0e0;
-    vertical-align: top;
+    border-radius: 6px;
+    border-left: 4px solid #0073aa;
 }
 
-.ebook-meta-box table.form-table td {
-    padding: 15px 10px;
-    border-bottom: 1px solid #e0e0e0;
-}
-
-.ebook-meta-box input[type="text"],
-.ebook-meta-box input[type="url"],
-.ebook-meta-box input[type="date"],
-.ebook-meta-box input[type="number"],
-.ebook-meta-box select {
+.audio-meta-box audio {
     width: 100%;
-    max-width: 400px;
+    margin: 10px 0;
+}
+
+.audio-meta-box .audio-controls {
+    margin: 15px 0;
+}
+
+.audio-meta-box #generate_audio {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.audio-meta-box .manual-audio-url {
+    border-top: 1px solid #ddd;
+    padding-top: 15px;
+}
+
+.audio-meta-box .manual-audio-url label {
+    font-weight: 600;
+    color: #333;
+}
+
+#audio-generation-status {
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 14px;
+    display: none;
+}
+
+#audio-generation-status.loading {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+    display: block;
+}
+
+#audio-generation-status.success {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+    display: block;
+}
+
+#audio-generation-status.error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+    display: block;
+}
+
+/* Chapter Details Meta Box */
+.form-table th {
+    width: 120px;
+    font-weight: 600;
+}
+
+.form-table input[type="number"] {
+    width: 100px;
+}
+
+.form-table .description {
+    font-style: italic;
+    color: #666;
+    margin-top: 5px;
+}
+
+/* Custom eBook Taxonomy Meta Box */
+#taxonomy-ebook {
+    margin-bottom: 20px;
+}
+
+#taxonomy-ebook .categorydiv {
+    margin-bottom: 15px;
+}
+
+#ebookchecklist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    background: #fff;
+}
+
+#ebookchecklist li {
+    margin: 8px 0;
+    padding: 5px;
+    border-radius: 3px;
+    transition: background 0.2s;
+}
+
+#ebookchecklist li:hover {
+    background: #f0f8ff;
+}
+
+#ebookchecklist label {
+    display: block;
+    cursor: pointer;
+    font-weight: normal;
+    padding: 5px;
+}
+
+#ebookchecklist input[type="radio"] {
+    margin-right: 8px;
+}
+
+/* Add New eBook Section */
+.add-new-ebook {
+    background: #f9f9f9;
+    padding: 15px;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+}
+
+.add-new-ebook h4 {
+    margin: 0 0 10px 0;
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#new_ebook_name {
     padding: 8px 12px;
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 14px;
 }
 
-.ebook-meta-box input[type="number"] {
-    width: 100px;
-}
-
-/* Generate audio button */
-#generate_audio {
-    background: #28a745;
+#add_new_ebook {
+    background: #0073aa;
     color: white;
     border: none;
     padding: 8px 16px;
     border-radius: 4px;
+    font-size: 14px;
     cursor: pointer;
-    margin-top: 10px;
-    transition: background 0.3s ease;
+    transition: background 0.2s;
 }
 
-#generate_audio:hover {
-    background: #218838;
+#add_new_ebook:hover {
+    background: #005a87;
 }
 
-#generate_audio:disabled {
-    background: #6c757d;
+#add_new_ebook:disabled {
+    background: #ccc;
     cursor: not-allowed;
 }
 
-/* Chapter statistics box */
-#chapter-stats {
-    margin-bottom: 20px;
-}
-
-#chapter-stats .inside {
-    padding: 15px;
-}
-
-#chapter-stats h4 {
-    margin: 0 0 10px 0;
-    color: #333;
-}
-
-#chapter-stats p {
-    margin: 5px 0;
-    font-size: 14px;
-}
-
-/* Shortcode generator */
-.shortcode-display {
-    background: #f0f0f1;
-    padding: 10px;
-    border-radius: 4px;
-    font-family: Consolas, Monaco, monospace;
-    font-size: 13px;
-    display: inline-block;
-    margin: 10px 0;
-    word-break: break-all;
-}
-
-.shortcode-options {
-    border-top: 1px solid #e0e0e0;
-    padding-top: 15px;
-}
-
-.shortcode-options label {
-    display: inline-block;
-    margin-right: 15px;
-    font-weight: 600;
-}
-
-.shortcode-height {
-    margin-left: 5px;
-}
-
-/* Audio settings */
-.audio-settings {
-    background: #f8f9fa;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    padding: 15px;
-}
-
-.audio-settings label {
-    display: inline-block;
-    margin-right: 10px;
-    font-size: 14px;
-}
-
-.audio-settings input[type="radio"] {
-    margin-right: 5px;
-}
-
-.audio-settings input[type="range"] {
-    width: 100px;
-    vertical-align: middle;
-}
-
-.speed-display {
-    font-weight: 600;
-    color: #007cba;
-    font-size: 14px;
-}
-
-/* Chapter template selector */
-#chapter-template {
-    padding: 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    margin-bottom: 10px;
-}
-
-.apply-template {
-    width: 100%;
-}
-
-/* Sortable table rows */
-.wp-list-table tbody tr.ui-sortable-helper {
-    background: #fff;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    border: 1px solid #ddd;
-}
-
-.wp-list-table tbody tr.ui-sortable-placeholder {
-    background: #f0f8ff;
-    border: 2px dashed #007cba;
-    height: 40px;
-}
-
-.wp-list-table .column-title .dashicons-menu {
-    opacity: 0.5;
-    transition: opacity 0.3s ease;
-}
-
-.wp-list-table tbody tr:hover .dashicons-menu {
-    opacity: 1;
-}
-
-/* Bulk operations */
-select[name="bulk_book_id"] {
-    margin-left: 10px;
-    padding: 4px 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-}
-
-/* Preview button */
-.row-actions .preview a {
-    color: #007cba;
-    text-decoration: none;
-}
-
-.row-actions .preview a:hover {
-    color: #005a87;
-}
-
-/* Admin notices */
-.notice.ebook-notice {
-    border-left: 4px solid #007cba;
-    padding: 15px;
-    margin: 15px 0;
-    background: white;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.notice.ebook-notice.notice-success {
-    border-left-color: #28a745;
-}
-
-.notice.ebook-notice.notice-error {
-    border-left-color: #dc3545;
-}
-
-.notice.ebook-notice .notice-dismiss {
-    position: absolute;
-    right: 1px;
-    top: 0;
-    border: none;
-    background: none;
-    color: #666;
-    cursor: pointer;
-    padding: 10px 15px;
-    font-size: 18px;
-}
-
-/* Post list enhancements */
-.wp-list-table .column-ebook_book {
-    width: 200px;
-}
-
-.wp-list-table .column-chapter_order {
+/* Admin List Table Enhancements */
+.wp-admin .wp-list-table .column-chapter_order {
     width: 80px;
     text-align: center;
 }
 
-.wp-list-table .column-audio_status {
+.wp-admin .wp-list-table .column-audio_status {
     width: 100px;
     text-align: center;
 }
 
-.audio-status-yes {
-    color: #28a745;
+.wp-admin .wp-list-table .column-ebook {
+    width: 150px;
+}
+
+/* Quick Edit Enhancements */
+.quick-edit-row .inline-edit-col-left .alignleft {
+    width: 48%;
+}
+
+.quick-edit-row .inline-edit-col-right .alignright {
+    width: 48%;
+}
+
+/* Status Indicators */
+.audio-status-available {
+    color: #46b450;
     font-weight: 600;
 }
 
-.audio-status-no {
-    color: #dc3545;
-    font-weight: 600;
+.audio-status-none {
+    color: #999;
 }
 
-/* Dashboard widget */
-.ebook-dashboard-widget {
-    padding: 15px;
-}
-
-.ebook-stats {
-    display: flex;
-    gap: 20px;
-    margin-bottom: 20px;
-}
-
-.ebook-stat {
-    flex: 1;
-    text-align: center;
-    padding: 15px;
-    background: #f8f9fa;
-    border-radius: 8px;
-    border: 1px solid #e0e0e0;
-}
-
-.ebook-stat-number {
-    font-size: 24px;
-    font-weight: bold;
-    color: #007cba;
-    display: block;
-}
-
-.ebook-stat-label {
-    font-size: 12px;
-    color: #666;
-    margin-top: 5px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.ebook-recent-activity {
-    border-top: 1px solid #e0e0e0;
-    padding-top: 15px;
-}
-
-.ebook-recent-activity h4 {
-    margin: 0 0 10px 0;
-    color: #333;
-}
-
-.ebook-activity-item {
-    padding: 8px 0;
-    border-bottom: 1px solid #f0f0f0;
-    font-size: 14px;
-}
-
-.ebook-activity-item:last-child {
-    border-bottom: none;
-}
-
-.ebook-activity-time {
-    color: #666;
-    font-size: 12px;
-}
-
-/* Import/Export section */
-.ebook-import-export {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 20px;
-    margin: 20px 0;
-}
-
-.ebook-import-export h3 {
-    margin-top: 0;
-    color: #333;
-    border-bottom: 1px solid #e0e0e0;
-    padding-bottom: 10px;
-}
-
-.import-section, .export-section {
-    margin-bottom: 20px;
-}
-
-.import-section h4, .export-section h4 {
-    color: #007cba;
-    margin-bottom: 10px;
-}
-
-.file-upload-area {
-    border: 2px dashed #ccc;
-    border-radius: 8px;
-    padding: 30px;
-    text-align: center;
-    transition: border-color 0.3s ease;
-}
-
-.file-upload-area.dragover {
-    border-color: #007cba;
-    background: #f0f8ff;
-}
-
-.file-upload-area input[type="file"] {
-    display: none;
-}
-
-.upload-btn {
-    background: #007cba;
+.chapter-order-badge {
+    display: inline-block;
+    background: #0073aa;
     color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-top: 10px;
-}
-
-.upload-btn:hover {
-    background: #005a87;
-}
-
-/* Progress bars */
-.ebook-progress-bar {
-    width: 100%;
-    height: 20px;
-    background: #f0f0f0;
-    border-radius: 10px;
-    overflow: hidden;
-    margin: 10px 0;
-}
-
-.ebook-progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #007cba 0%, #0056b3 100%);
-    border-radius: 10px;
-    transition: width 0.3s ease;
-    position: relative;
-}
-
-.ebook-progress-text {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: white;
-    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
     font-weight: 600;
+    min-width: 20px;
+    text-align: center;
 }
 
-/* Responsive admin styles */
-@media (max-width: 768px) {
-    .ebook-stats {
-        flex-direction: column;
-        gap: 10px;
-    }
-    
-    .ebook-meta-box table.form-table th,
-    .ebook-meta-box table.form-table td {
-        display: block;
-        width: 100%;
-    }
-    
-    .ebook-meta-box table.form-table th {
-        background: none;
-        border-bottom: none;
-        padding-bottom: 5px;
-    }
-    
-    .shortcode-options label {
-        display: block;
-        margin-bottom: 10px;
-    }
-    
-    .shortcode-display {
-        word-break: break-all;
-        font-size: 12px;
-    }
-}
-
-/* Loading states */
-.ebook-loading {
+/* Loading States */
+.button.loading {
     position: relative;
-    opacity: 0.6;
+    color: transparent !important;
     pointer-events: none;
 }
 
-.ebook-loading::after {
+.button.loading::after {
     content: '';
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 20px;
-    height: 20px;
-    margin: -10px 0 0 -10px;
-    border: 2px solid #ccc;
-    border-top-color: #007cba;
+    margin: -8px 0 0 -8px;
+    width: 16px;
+    height: 16px;
+    border: 2px solid transparent;
+    border-top: 2px solid #fff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
-    to {
-        transform: rotate(360deg);
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Notifications */
+.ebook-admin-notice {
+    margin: 15px 0;
+    padding: 12px;
+    border-left: 4px solid #0073aa;
+    background: #fff;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+}
+
+.ebook-admin-notice.notice-success {
+    border-left-color: #46b450;
+}
+
+.ebook-admin-notice.notice-error {
+    border-left-color: #dc3232;
+}
+
+.ebook-admin-notice.notice-warning {
+    border-left-color: #ffb900;
+}
+
+/* Chapter Management Helper */
+.chapter-management-help {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 6px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.chapter-management-help h3 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 16px;
+}
+
+.chapter-management-help p {
+    margin: 10px 0;
+    color: #666;
+    line-height: 1.5;
+}
+
+.chapter-management-help ul {
+    margin: 10px 0 10px 20px;
+    color: #666;
+}
+
+.chapter-management-help li {
+    margin: 5px 0;
+}
+
+/* eBook Taxonomy Term Edit Page */
+.term-description-wrap textarea {
+    height: 120px;
+}
+
+/* Responsive Admin Styles */
+@media screen and (max-width: 782px) {
+    .add-new-ebook {
+        padding: 10px;
+    }
+    
+    #new_ebook_name {
+        width: 100%;
+        margin-bottom: 10px;
+    }
+    
+    #add_new_ebook {
+        width: 100%;
+    }
+    
+    .audio-meta-box .audio-controls {
+        text-align: center;
+    }
+    
+    .audio-meta-box #generate_audio {
+        width: 100%;
     }
 }
 
-/* Help text */
-.ebook-help-text {
-    color: #666;
-    font-style: italic;
-    font-size: 13px;
-    margin-top: 5px;
-}
-
-/* Success/Error states */
-.ebook-success {
-    color: #28a745;
-    font-weight: 600;
-}
-
-.ebook-error {
-    color: #dc3545;
-    font-weight: 600;
-}
-
-/* Custom icons */
-.ebook-icon {
-    width: 20px;
-    height: 20px;
-    display: inline-block;
-    vertical-align: middle;
-    margin-right: 5px;
-}
-
-.ebook-icon-book::before {
-    content: '📚';
-    font-size: 16px;
-}
-
-.ebook-icon-chapter::before {
-    content: '📄';
-    font-size: 16px;
-}
-
-.ebook-icon-audio::before {
-    content: '🔊';
-    font-size: 16px;
+/* Dark Mode Support for WordPress Admin */
+@media (prefers-color-scheme: dark) {
+    .add-new-ebook {
+        background: #2c3338;
+        border-color: #50575e;
+    }
+    
+    .add-new-ebook h4 {
+        color: #c3c4c7;
+    }
+    
+    #new_ebook_name {
+        background: #1d2327;
+        border-color: #50575e;
+        color: #c3c4c7;
+    }
+    
+    #ebookchecklist {
+        background: #1d2327;
+        border-color: #50575e;
+    }
+    
+    #ebookchecklist li:hover {
+        background: #2c3338;
+    }
+    
+    .audio-meta-box .current-audio {
+        background: #2c3338;
+        border-left-color: #72aee6;
+    }
 }
