@@ -17,6 +17,7 @@ define('EBOOK_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
 class InteractiveEBookPlugin
 {
+
     public function __construct()
     {
         add_action('init', array($this, 'init'));
@@ -34,10 +35,6 @@ class InteractiveEBookPlugin
         add_action('manage_ebook_chapter_posts_custom_column', array($this, 'display_admin_columns'), 10, 2);
         add_filter('manage_edit-ebook_chapter_sortable_columns', array($this, 'make_columns_sortable'));
 
-        // Add audio settings page - THIS WAS MISSING
-        add_action('admin_menu', array($this, 'add_audio_settings_page'));
-        add_action('wp_ajax_test_audio_api', array($this, 'test_audio_api'));
-
         register_activation_hook(__FILE__, array($this, 'activate'));
     }
 
@@ -46,59 +43,57 @@ class InteractiveEBookPlugin
         $this->create_post_types();
         $this->create_taxonomies();
     }
-
-    public function debug_audio_generation($chapter_id) {
-        $chapter = get_post($chapter_id);
-        if (!$chapter) {
-            return ['error' => 'Chapter not found'];
-        }
-        
-        $api_key = get_option('ebook_openai_api_key');
-        $text = strip_tags($chapter->post_content);
-        $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
-        $text = trim($text);
-        
-        $debug_info = [
-            'api_key_set' => !empty($api_key),
-            'api_key_length' => strlen($api_key),
-            'text_length' => strlen($text),
-            'text_word_count' => str_word_count($text),
-            'chapter_title' => $chapter->post_title,
-            'wp_upload_dir' => wp_upload_dir(),
-            'curl_version' => curl_version(),
-        ];
-        
-        // Test API connection
-        if (!empty($api_key)) {
-            $test_response = $this->test_openai_connection($api_key);
-            $debug_info['api_test'] = $test_response;
-        }
-        
-        return $debug_info;
+public function debug_audio_generation($chapter_id) {
+    $chapter = get_post($chapter_id);
+    if (!$chapter) {
+        return ['error' => 'Chapter not found'];
     }
-
-    private function test_openai_connection($api_key) {
-        $curl = curl_init();
-        curl_setopt_array($curl, [
-            CURLOPT_URL => "https://api.openai.com/v1/models",
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [
-                "Authorization: Bearer " . $api_key,
-            ],
-            CURLOPT_TIMEOUT => 10,
-        ]);
-        
-        $response = curl_exec($curl);
-        $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        curl_close($curl);
-        
-        return [
-            'http_code' => $http_code,
-            'success' => $http_code === 200,
-            'response_preview' => substr($response, 0, 200)
-        ];
+    
+    $api_key = get_option('ebook_openai_api_key');
+    $text = strip_tags($chapter->post_content);
+    $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
+    $text = trim($text);
+    
+    $debug_info = [
+        'api_key_set' => !empty($api_key),
+        'api_key_length' => strlen($api_key),
+        'text_length' => strlen($text),
+        'text_word_count' => str_word_count($text),
+        'chapter_title' => $chapter->post_title,
+        'wp_upload_dir' => wp_upload_dir(),
+        'curl_version' => curl_version(),
+    ];
+    
+    // Test API connection
+    if (!empty($api_key)) {
+        $test_response = $this->test_openai_connection($api_key);
+        $debug_info['api_test'] = $test_response;
     }
+    
+    return $debug_info;
+}
 
+private function test_openai_connection($api_key) {
+    $curl = curl_init();
+    curl_setopt_array($curl, [
+        CURLOPT_URL => "https://api.openai.com/v1/models",
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            "Authorization: Bearer " . $api_key,
+        ],
+        CURLOPT_TIMEOUT => 10,
+    ]);
+    
+    $response = curl_exec($curl);
+    $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    curl_close($curl);
+    
+    return [
+        'http_code' => $http_code,
+        'success' => $http_code === 200,
+        'response_preview' => substr($response, 0, 200)
+    ];
+}
     public function create_post_types()
     {
         // Register Chapters post type only
@@ -499,7 +494,8 @@ class InteractiveEBookPlugin
             wp_send_json_error('No text content found in chapter');
         }
 
-        // Generate audio using OpenAI TTS
+        // For demo purposes, we'll simulate audio generation
+        // In production, you would integrate with actual text-to-speech services
         $audio_url = $this->generate_audio_simulation($text, $chapter_id);
 
         if ($audio_url) {
@@ -510,348 +506,199 @@ class InteractiveEBookPlugin
                 'message' => 'Audio generated successfully!'
             ));
         } else {
-            wp_send_json_error('Failed to generate audio. Please check your OpenAI API key in Audio Settings and ensure you have credits available.');
+            wp_send_json_error('Failed to generate audio');
         }
     }
 
     private function generate_audio_simulation($text, $chapter_id) {
-        $openai_api_key = get_option('ebook_openai_api_key');
-        if (empty($openai_api_key)) {
-            error_log("❌ OpenAI API key not found. Please configure it in Audio Settings.");
-            return false;
-        }
-
-        // Limit text length to prevent API errors (OpenAI TTS has a 4096 character limit)
-        if (strlen($text) > 4000) {
-            $text = substr($text, 0, 4000) . '...';
-        }
-
-        $upload_dir = wp_upload_dir();
-        $audio_filename = 'chapter-' . $chapter_id . '-' . time() . '.mp3';
-        $audio_path = $upload_dir['path'] . '/' . $audio_filename;
-        $audio_url  = $upload_dir['url']  . '/' . $audio_filename;
-
-        // Get voice and model from settings
-        $voice = get_option('ebook_tts_voice', 'alloy');
-        $model = get_option('ebook_tts_model', 'tts-1');
-
-        $curl = curl_init();
-        curl_setopt_array($curl, [
-            CURLOPT_URL => "https://api.openai.com/v1/audio/speech",
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => [
-                "Authorization: Bearer " . $openai_api_key,
-                "Content-Type: application/json"
-            ],
-            CURLOPT_POSTFIELDS => json_encode([
-                "model" => $model,
-                "input" => $text,
-                "voice" => $voice,
-                "response_format" => "mp3"
-            ]),
-            CURLOPT_TIMEOUT => 120,
-            CURLOPT_SSL_VERIFYPEER => true,
-        ]);
-
-        $response = curl_exec($curl);
-        $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $error = curl_error($curl);
-        curl_close($curl);
-
-        // Enhanced error handling
-        if ($error) {
-            error_log("❌ cURL Error: " . $error);
-            return false;
-        }
-
-        if ($http_code === 200 && !empty($response)) {
-            // Check if response is actually audio data
-            $file_header = substr($response, 0, 10);
-            
-            // MP3 files start with ID3 tags or FF sync byte
-            if (strpos($file_header, 'ID3') === 0 || (ord($file_header[0]) === 0xFF && (ord($file_header[1]) & 0xE0) === 0xE0)) {
-                if (file_put_contents($audio_path, $response)) {
-                    error_log("✅ Audio generated successfully: " . $audio_url);
-                    return $audio_url;
-                } else {
-                    error_log("❌ Failed to save audio file to: " . $audio_path);
-                }
-            } else {
-                error_log("❌ Invalid audio response. Response preview: " . substr($response, 0, 200));
-                
-                // Try to decode as JSON error
-                $json_response = json_decode($response, true);
-                if ($json_response && isset($json_response['error'])) {
-                    error_log("❌ OpenAI API Error: " . $json_response['error']['message']);
-                }
-            }
-        } else {
-            $error_response = json_decode($response, true);
-            if ($error_response && isset($error_response['error'])) {
-                $error_message = $error_response['error']['message'];
-                error_log("❌ OpenAI API Error (HTTP $http_code): " . $error_message);
-            } else {
-                error_log("❌ OpenAI API Error (HTTP $http_code): " . substr($response, 0, 200));
-            }
-        }
-
+    $openai_api_key = get_option('ebook_openai_api_key');
+    if (empty($openai_api_key)) {
+        error_log("❌ OpenAI API key not found.");
         return false;
     }
 
-    // Add audio settings page
-    public function add_audio_settings_page() {
-        add_submenu_page(
-            'edit.php?post_type=ebook_chapter',
-            'Audio Settings',
-            'Audio Settings',
-            'manage_options',
-            'ebook-audio-settings',
-            array($this, 'render_audio_settings_page')
-        );
+    // Limit text length to prevent API errors
+    if (strlen($text) > 4096) {
+        $text = substr($text, 0, 4096) . '...';
     }
 
-    public function render_audio_settings_page() {
-        if (isset($_POST['submit'])) {
-            update_option('ebook_openai_api_key', sanitize_text_field($_POST['openai_api_key']));
-            update_option('ebook_tts_voice', sanitize_text_field($_POST['tts_voice']));
-            update_option('ebook_tts_model', sanitize_text_field($_POST['tts_model']));
-            echo '<div class="notice notice-success"><p>Settings saved!</p></div>';
+    $upload_dir = wp_upload_dir();
+    $audio_filename = 'chapter-' . $chapter_id . '-' . time() . '.mp3';
+    $audio_path = $upload_dir['path'] . '/' . $audio_filename;
+    $audio_url  = $upload_dir['url']  . '/' . $audio_filename;
+
+    $curl = curl_init();
+    curl_setopt_array($curl, [
+        CURLOPT_URL => "https://api.openai.com/v1/audio/speech",
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => [
+            "Authorization: Bearer " . $openai_api_key,
+            "Content-Type: application/json"
+        ],
+        CURLOPT_POSTFIELDS => json_encode([
+            "model" => "tts-1", // Correct model name
+            "input" => $text,
+            "voice" => "alloy",
+            "response_format" => "mp3"
+        ]),
+        CURLOPT_TIMEOUT => 120,
+        CURLOPT_SSL_VERIFYPEER => true,
+    ]);
+
+    $response = curl_exec($curl);
+    $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    $error = curl_error($curl);
+    curl_close($curl);
+
+    // Enhanced error handling
+    if ($error) {
+        error_log("❌ cURL Error: " . $error);
+        return false;
+    }
+
+    if ($http_code === 200 && !empty($response)) {
+        // Verify it's actually audio data
+        $file_header = substr($response, 0, 4);
+        if (strpos($file_header, 'ID3') === 0 || ord($file_header[0]) === 0xFF) {
+            if (file_put_contents($audio_path, $response)) {
+                return $audio_url;
+            } else {
+                error_log("❌ Failed to save audio file to: " . $audio_path);
+            }
+        } else {
+            error_log("❌ Invalid audio response. First 100 chars: " . substr($response, 0, 100));
         }
+    } else {
+        $error_response = json_decode($response, true);
+        $error_message = isset($error_response['error']['message']) ? $error_response['error']['message'] : $response;
+        error_log("❌ OpenAI API Error (HTTP $http_code): " . $error_message);
+    }
+
+    return false;
+}
+// Add to your InteractiveEBookPlugin class
+public function add_audio_settings_page() {
+    add_submenu_page(
+        'edit.php?post_type=ebook_chapter',
+        'Audio Settings',
+        'Audio Settings',
+        'manage_options',
+        'ebook-audio-settings',
+        array($this, 'render_audio_settings_page')
+    );
+}
+
+public function render_audio_settings_page() {
+    if (isset($_POST['submit'])) {
+        update_option('ebook_openai_api_key', sanitize_text_field($_POST['openai_api_key']));
+        update_option('ebook_tts_voice', sanitize_text_field($_POST['tts_voice']));
+        update_option('ebook_tts_model', sanitize_text_field($_POST['tts_model']));
+        echo '<div class="notice notice-success"><p>Settings saved!</p></div>';
+    }
+    
+    $api_key = get_option('ebook_openai_api_key', '');
+    $voice = get_option('ebook_tts_voice', 'alloy');
+    $model = get_option('ebook_tts_model', 'tts-1');
+    
+    ?>
+    <div class="wrap">
+        <h1>eBook Audio Settings</h1>
         
-        $api_key = get_option('ebook_openai_api_key', '');
-        $voice = get_option('ebook_tts_voice', 'alloy');
-        $model = get_option('ebook_tts_model', 'tts-1');
+        <form method="post" action="">
+            <table class="form-table">
+                <tr>
+                    <th scope="row">OpenAI API Key</th>
+                    <td>
+                        <input type="password" name="openai_api_key" value="<?php echo esc_attr($api_key); ?>" class="regular-text" />
+                        <p class="description">Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">Voice</th>
+                    <td>
+                        <select name="tts_voice">
+                            <option value="alloy" <?php selected($voice, 'alloy'); ?>>Alloy</option>
+                            <option value="echo" <?php selected($voice, 'echo'); ?>>Echo</option>
+                            <option value="fable" <?php selected($voice, 'fable'); ?>>Fable</option>
+                            <option value="onyx" <?php selected($voice, 'onyx'); ?>>Onyx</option>
+                            <option value="nova" <?php selected($voice, 'nova'); ?>>Nova</option>
+                            <option value="shimmer" <?php selected($voice, 'shimmer'); ?>>Shimmer</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">TTS Model</th>
+                    <td>
+                        <select name="tts_model">
+                            <option value="tts-1" <?php selected($model, 'tts-1'); ?>>TTS-1 (Standard)</option>
+                            <option value="tts-1-hd" <?php selected($model, 'tts-1-hd'); ?>>TTS-1-HD (Higher Quality)</option>
+                        </select>
+                        <p class="description">TTS-1-HD provides higher quality but costs more</p>
+                    </td>
+                </tr>
+            </table>
+            
+            <?php submit_button(); ?>
+        </form>
         
-        ?>
-        <div class="wrap">
-            <h1>eBook Audio Settings</h1>
+        <h2>Test Audio Generation</h2>
+        <button id="test-audio-generation" class="button">Test API Connection</button>
+        <div id="test-results"></div>
+    </div>
+    
+    <script>
+    jQuery(document).ready(function($) {
+        $('#test-audio-generation').click(function() {
+            var $button = $(this);
+            var $results = $('#test-results');
             
-            <div class="notice notice-info">
-                <p><strong>Important:</strong> You need an OpenAI API key to generate audio. Get one from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.</p>
-                <p>Make sure your OpenAI account has available credits. TTS-1 costs $15.00 per 1M characters.</p>
-            </div>
+            $button.prop('disabled', true).text('Testing...');
+            $results.html('<p>Testing API connection...</p>');
             
-            <form method="post" action="">
-                <?php wp_nonce_field('ebook_audio_settings', 'ebook_audio_nonce'); ?>
-                <table class="form-table">
-                    <tr>
-                        <th scope="row">OpenAI API Key</th>
-                        <td>
-                            <input type="password" name="openai_api_key" value="<?php echo esc_attr($api_key); ?>" class="regular-text" />
-                            <p class="description">Your OpenAI API key (starts with sk-...)</p>
-                            <?php if (!empty($api_key)): ?>
-                                <p style="color: green;">✓ API Key is set</p>
-                            <?php else: ?>
-                                <p style="color: red;">⚠ No API Key configured</p>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Voice</th>
-                        <td>
-                            <select name="tts_model">
-                                <option value="tts-1" <?php selected($model, 'tts-1'); ?>>TTS-1 (Standard - $15/1M chars)</option>
-                                <option value="tts-1-hd" <?php selected($model, 'tts-1-hd'); ?>>TTS-1-HD (Higher Quality - $30/1M chars)</option>
-                            </select>
-                            <p class="description">TTS-1-HD provides higher quality but costs twice as much</p>
-                        </td>
-                    </tr>
-                </table>
-                
-                <?php submit_button(); ?>
-            </form>
-            
-            <h2>Test Audio Generation</h2>
-            <button id="test-audio-generation" class="button">Test API Connection</button>
-            <div id="test-results"></div>
-            
-            <h2>Bulk Operations</h2>
-            <p>Generate audio for all chapters in an eBook at once.</p>
-            <select id="bulk-ebook-select">
-                <option value="">Select an eBook...</option>
-                <?php
-                $ebooks = get_terms(array(
-                    'taxonomy' => 'ebook',
-                    'hide_empty' => false
-                ));
-                foreach ($ebooks as $ebook) {
-                    $chapter_count = wp_count_posts('ebook_chapter');
-                    echo '<option value="' . $ebook->term_id . '">' . esc_html($ebook->name) . '</option>';
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'test_audio_api',
+                    nonce: '<?php echo wp_create_nonce('test_audio_api'); ?>'
+                },
+                success: function(response) {
+                    if (response.success) {
+                        $results.html('<div class="notice notice-success"><p>✅ API connection successful!</p></div>');
+                    } else {
+                        $results.html('<div class="notice notice-error"><p>❌ ' + response.data + '</p></div>');
+                    }
+                },
+                complete: function() {
+                    $button.prop('disabled', false).text('Test API Connection');
                 }
-                ?>
-            </select>
-            <button id="bulk-generate-audio" class="button" disabled>Generate All Audio</button>
-            <div id="bulk-progress" style="margin-top: 10px;"></div>
-        </div>
-        
-        <script>
-        jQuery(document).ready(function($) {
-            // Test API connection
-            $('#test-audio-generation').click(function() {
-                var $button = $(this);
-                var $results = $('#test-results');
-                
-                $button.prop('disabled', true).text('Testing...');
-                $results.html('<p>Testing API connection...</p>');
-                
-                $.ajax({
-                    url: ajaxurl,
-                    type: 'POST',
-                    data: {
-                        action: 'test_audio_api',
-                        nonce: '<?php echo wp_create_nonce('test_audio_api'); ?>'
-                    },
-                    success: function(response) {
-                        if (response.success) {
-                            $results.html('<div class="notice notice-success"><p>✅ API connection successful!</p></div>');
-                        } else {
-                            $results.html('<div class="notice notice-error"><p>❌ ' + response.data + '</p></div>');
-                        }
-                    },
-                    complete: function() {
-                        $button.prop('disabled', false).text('Test API Connection');
-                    }
-                });
-            });
-            
-            // Enable bulk generate when ebook is selected
-            $('#bulk-ebook-select').change(function() {
-                $('#bulk-generate-audio').prop('disabled', !$(this).val());
-            });
-            
-            // Bulk generate audio
-            $('#bulk-generate-audio').click(function() {
-                var ebookId = $('#bulk-ebook-select').val();
-                var $button = $(this);
-                var $progress = $('#bulk-progress');
-                
-                if (!ebookId) return;
-                
-                $button.prop('disabled', true).text('Generating...');
-                $progress.html('<div class="notice notice-info"><p>🔄 Starting bulk audio generation...</p></div>');
-                
-                $.ajax({
-                    url: ajaxurl,
-                    type: 'POST',
-                    data: {
-                        action: 'bulk_generate_audio',
-                        ebook_id: ebookId,
-                        nonce: '<?php echo wp_create_nonce('ebook_nonce'); ?>'
-                    },
-                    timeout: 300000, // 5 minutes
-                    success: function(response) {
-                        if (response.success) {
-                            var summary = response.data.summary;
-                            var html = '<div class="notice notice-success">';
-                            html += '<p>✅ Bulk generation complete!</p>';
-                            html += '<p>Success: ' + summary.success + ' | Errors: ' + summary.errors + ' | Skipped: ' + summary.skipped + '</p>';
-                            html += '</div>';
-                            $progress.html(html);
-                        } else {
-                            $progress.html('<div class="notice notice-error"><p>❌ ' + response.data + '</p></div>');
-                        }
-                    },
-                    error: function() {
-                        $progress.html('<div class="notice notice-error"><p>❌ Request failed</p></div>');
-                    },
-                    complete: function() {
-                        $button.prop('disabled', false).text('Generate All Audio');
-                    }
-                });
             });
         });
-        </script>
-        <?php
-    }
+    });
+    </script>
+    <?php
+}
 
-    // AJAX handler for testing API
-    public function test_audio_api() {
-        if (!wp_verify_nonce($_POST['nonce'], 'test_audio_api')) {
-            wp_send_json_error('Security check failed');
-        }
-        
-        $api_key = get_option('ebook_openai_api_key');
-        if (empty($api_key)) {
-            wp_send_json_error('No API key configured');
-        }
-        
-        $test_result = $this->test_openai_connection($api_key);
-        
-        if ($test_result['success']) {
-            wp_send_json_success('API connection successful');
-        } else {
-            wp_send_json_error('API connection failed: HTTP ' . $test_result['http_code']);
-        }
+// AJAX handler for testing API
+public function test_audio_api() {
+    if (!wp_verify_nonce($_POST['nonce'], 'test_audio_api')) {
+        wp_send_json_error('Security check failed');
     }
-
-    // Bulk generate audio for all chapters in an eBook
-    public function bulk_generate_audio() {
-        if (!wp_verify_nonce($_POST['nonce'], 'ebook_nonce')) {
-            wp_die('Security check failed');
-        }
-        
-        $ebook_id = intval($_POST['ebook_id']);
-        
-        $chapters = get_posts(array(
-            'post_type' => 'ebook_chapter',
-            'posts_per_page' => -1,
-            'post_status' => 'publish',
-            'tax_query' => array(
-                array(
-                    'taxonomy' => 'ebook',
-                    'field' => 'term_id',
-                    'terms' => $ebook_id,
-                ),
-            ),
-            'meta_key' => '_ebook_chapter_order',
-            'orderby' => 'meta_value_num',
-            'order' => 'ASC'
-        ));
-        
-        $results = [];
-        $success_count = 0;
-        $error_count = 0;
-        $skipped_count = 0;
-        
-        foreach ($chapters as $chapter) {
-            $existing_audio = get_post_meta($chapter->ID, '_ebook_audio_url', true);
-            if (!empty($existing_audio)) {
-                $skipped_count++;
-                continue; // Skip if audio already exists
-            }
-            
-            $text = strip_tags($chapter->post_content);
-            $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
-            $text = trim($text);
-            
-            if (empty($text)) {
-                $error_count++;
-                continue;
-            }
-            
-            $audio_url = $this->generate_audio_simulation($text, $chapter->ID);
-            
-            if ($audio_url) {
-                update_post_meta($chapter->ID, '_ebook_audio_url', $audio_url);
-                $success_count++;
-            } else {
-                $error_count++;
-            }
-            
-            // Add delay to avoid rate limiting
-            sleep(1);
-        }
-        
-        wp_send_json_success([
-            'summary' => [
-                'total' => count($chapters),
-                'success' => $success_count,
-                'errors' => $error_count,
-                'skipped' => $skipped_count
-            ]
-        ]);
+    
+    $api_key = get_option('ebook_openai_api_key');
+    if (empty($api_key)) {
+        wp_send_json_error('No API key configured');
     }
+    
+    $test_result = $this->test_openai_connection($api_key);
+    
+    if ($test_result['success']) {
+        wp_send_json_success('API connection successful');
+    } else {
+        wp_send_json_error('API connection failed: HTTP ' . $test_result['http_code']);
+    }
+}
 
     // Debug shortcode to check chapters
     public function debug_chapters($atts)
@@ -952,18 +799,4 @@ class InteractiveEBookPlugin
 }
 
 // Initialize the plugin
-new InteractiveEBookPlugin();voice">
-                                <option value="alloy" <?php selected($voice, 'alloy'); ?>>Alloy (Neutral)</option>
-                                <option value="echo" <?php selected($voice, 'echo'); ?>>Echo (Male)</option>
-                                <option value="fable" <?php selected($voice, 'fable'); ?>>Fable (British Male)</option>
-                                <option value="onyx" <?php selected($voice, 'onyx'); ?>>Onyx (Deep Male)</option>
-                                <option value="nova" <?php selected($voice, 'nova'); ?>>Nova (Female)</option>
-                                <option value="shimmer" <?php selected($voice, 'shimmer'); ?>>Shimmer (Soft Female)</option>
-                            </select>
-                            <p class="description">Choose the voice for text-to-speech</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">TTS Model</th>
-                        <td>
-                            <select name="tts_
+new InteractiveEBookPlugin();
